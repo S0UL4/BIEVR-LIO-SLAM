@@ -50,9 +50,11 @@
 #ifdef BIEVR_ROS_COMMON_ROS2
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/transform.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
@@ -62,8 +64,10 @@
 #endif
 #else  // BIEVR_ROS_COMMON_ROS1
 #include <geometry_msgs/Point.h>
+#include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Transform.h>
 #include <nav_msgs/Odometry.h>
+#include <nav_msgs/Path.h>
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
@@ -527,6 +531,23 @@ void transformToMsg(const Transform& transform, TransformMsgT& transform_msg) {
   transform_msg.rotation.y = q.y();
   transform_msg.rotation.z = q.z();
   transform_msg.rotation.w = q.w();
+}
+
+// Path -> nav_msgs/Path. `header` supplies the frame and the message stamp; each
+// entry keeps the stamp it was recorded at, so the poses stay on their own
+// timeline rather than all reporting the time of the latest one.
+template <typename PathMsgT>
+void pathToMsg(const Path& path, const Header& header, PathMsgT& path_msg) {
+  headerToMsg(header, path_msg.header);
+  path_msg.poses.clear();
+  path_msg.poses.reserve(path.poses.size());
+  Header pose_header = header;
+  for (const StampedPose& stamped : path.poses) {
+    pose_header.stamp = stamped.stamp;
+    auto& pose_msg = path_msg.poses.emplace_back();
+    headerToMsg(pose_header, pose_msg.header);
+    transformToMsg(stamped.pose, pose_msg.pose);
+  }
 }
 
 template <typename Vec3MsgT>

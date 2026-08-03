@@ -61,6 +61,9 @@ float computeSigmaFromRadius(int radius);
 
 std::vector<Point> getNeighborOffsets(double voxel_size);
 
+// to save the pointcloud to a PCD file, return true if successful
+bool savePointcloudPCD(const Pointcloud& cloud, const std::string& path);
+
 // State carried between frames by the live status dashboard: the pre-indented
 // ASCII art plus the accumulated trajectory length and the reference used to
 // integrate it and the elapsed time.

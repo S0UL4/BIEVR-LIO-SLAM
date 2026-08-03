@@ -7,6 +7,7 @@
 #include "bievr_lio/imu_integrator.h"
 #include "bievr_lio/log++.h"
 #include "bievr_lio/ls_optimizer.h"
+#include "bievr_lio/map_accumulator.h"
 #include "bievr_lio/preprocess.h"
 #include "bievr_lio/utils.h"
 
@@ -22,6 +23,8 @@ class Pipeline {
     BIEVRMap::Config map;
     bool print_timing = false;
     bool publish_all_clouds = false;
+    bool publish_path = true;  
+    size_t max_path_poses = 10000;
     bool print_debug = false;      // when true, lower the log level to show DEBUG messages
     bool print_dashboard = false;  // when true, print the fancy live status dashboard
     // Path to the ASCII art shown at the top of the dashboard (e.g. bievr_ascii.txt).
@@ -30,6 +33,11 @@ class Pipeline {
     std::string map_frame = "map";
     std::string body_frame = "body";
     std::string log_path = "";
+    // Accumulate the registered scans into a world-frame cloud that saveMap()
+    // can write out. Off means saveMap() has nothing to save.
+    bool accumulate_map = true;
+    double map_save_resolution = 0.1;
+    std::string map_save_path = "";
 
     size_t min_points_for_map_init = 100;
     size_t map_size_running_threshold = 5;
@@ -44,6 +52,15 @@ class Pipeline {
 
   void processFrame(const std::vector<ImuMeasurement>& imu_data,
                     const StampedIntensityPointcloud& pointcloud);
+
+  // Writes the accumulated registered cloud as a binary PCD. An empty `path`
+  // falls back to config.map_save_path (itself defaulting to ./bievr_map.pcd).
+  // On success `written_path` reports where it landed. Fails if nothing has
+  // been accumulated yet.
+  bool saveMap(const std::string& path, std::string* written_path = nullptr) const;
+
+  // Number of points currently held in the accumulated map.
+  size_t accumulatedMapSize() const { return map_accumulator_ ? map_accumulator_->size() : 0; }
 
   template <typename T>
   void registerPublisher(std::function<void(const T&, const Header&, const std::string& topic,
@@ -89,6 +106,8 @@ class Pipeline {
                     const Pointcloud& source_fine, const Pointcloud& undistorted,
                     const IntensityView& intensities);
   void publishLatestState(const Header& header);
+  void publishPath(const Transform& pose, const Header& header);
+  void accumulateMap(const Pointcloud& registered);
   void publishDebugClouds(const Pointcloud& source_filtered, const Pointcloud& source_coarse,
                           const Pointcloud& source_fine, const Pointcloud& undistorted_cloud,
                           const IntensityView& intensities, const Transform& T_W_I,
@@ -110,6 +129,11 @@ class Pipeline {
   V3 gravity_dir_ = V3(0, 0, 1);
   // Latest gyro reading, used to report the angular velocity in the odometry twist.
   V3 latest_gyro_ = V3::Zero();
+  // Full odometry trajectory, republished as a path with every state publish.
+  Path path_;
+  // Collects the registered scans for saveMap() on its own thread. Null when
+  // map accumulation is disabled.
+  std::unique_ptr<MapAccumulator> map_accumulator_;
   // Accelerometer scale resolved during bias estimation (1 if raw, g if the IMU
   // reports gravity-normalized accelerations). Applied to all incoming IMU data.
   double imu_acc_scale_ = 1.0;

@@ -168,6 +168,16 @@ inline void printConfigOverview(const Config& config) {
   os << "  t_init:               " << hc.imu.t_init << "\n";
   os << "  normalized:           " << hc.imu.normalized << "\n";
   os << "  frame:                " << hc.body_frame << "\n";
+  os << "path:\n";
+  os << "  publish:              " << yn(hc.publish_path) << "\n";
+  os << "  max_poses:            "
+     << (hc.max_path_poses > 0 ? std::to_string(hc.max_path_poses) : std::string("unlimited"))
+     << "\n";
+  os << "map_save:\n";
+  os << "  accumulate:           " << yn(hc.accumulate_map) << "\n";
+  os << "  resolution_m:         " << hc.map_save_resolution << "\n";
+  os << "  path:                 "
+     << (hc.map_save_path.empty() ? "<cwd>/bievr_map.pcd" : hc.map_save_path) << "\n";
   os << "debug:\n";
   os << "  publish_all_clouds:        " << yn(hc.publish_all_clouds) << "\n";
   os << "  print_timing:         " << yn(hc.print_timing) << "\n";
@@ -256,6 +266,26 @@ inline bool loadConfigFromYaml(const std::vector<std::string>& yaml_paths, Confi
   hc.imu.normalized = yaml.get<double>("imu", "normalized", -1.0);
   // The IMU frame is the body (child) frame of the published odometry.
   hc.body_frame = yaml.get<std::string>("imu", "frame", hc.body_frame);
+
+  // --- path (published trajectory) ---
+  hc.publish_path = yaml.get<bool>("path", "publish", true);
+  // Unlike the resolutions above, 0 is meaningful here (unlimited), so this is
+  // checked for negativity rather than run through getPositive().
+  const int max_path_poses = yaml.get<int>("path", "max_poses", 10000);
+  if (max_path_poses < 0) {
+    LOG(E, "Config error: 'path.max_poses' must be >= 0 (0 = unlimited), got " << max_path_poses
+                                                                               << ".");
+    return false;
+  }
+  hc.max_path_poses = static_cast<size_t>(max_path_poses);
+
+  // --- map saving (accumulated registered scans, written by the save service) ---
+  hc.accumulate_map = yaml.get<bool>("map_save", "accumulate", true);
+  hc.map_save_path = yaml.get<std::string>("map_save", "path", "");
+  if (!config_internal::getPositive(yaml, "map_save", "resolution_m", 0.1,
+                                    hc.map_save_resolution)) {
+    return false;
+  }
 
   // --- debug ---
   hc.publish_all_clouds = yaml.get<bool>("debug", "publish_all_clouds", false);

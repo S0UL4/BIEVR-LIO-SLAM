@@ -7,6 +7,7 @@
 #include <geometry_msgs/msg/vector3_stamped.hpp>
 #include <memory>
 #include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/path.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <string>
@@ -55,6 +56,7 @@ struct Ros2Backend {
   using TypedPublisher = bievr::TypedPublisher;
   using PointCloud2 = sensor_msgs::msg::PointCloud2;
   using Odometry = nav_msgs::msg::Odometry;
+  using Path = nav_msgs::msg::Path;
   using Vector3Stamped = geometry_msgs::msg::Vector3Stamped;
   using TransformStamped = geometry_msgs::msg::TransformStamped;
 

@@ -2,11 +2,64 @@
 
 #include <cmath>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <system_error>
+
+#include "bievr_lio/log++.h"
 
 namespace bievr {
+
+bool savePointcloudPCD(const Pointcloud& cloud, const std::string& path) {
+  namespace fs = std::filesystem;
+  const fs::path out(path);
+  if (out.has_parent_path()) {
+    std::error_code ec;
+    fs::create_directories(out.parent_path(), ec);
+    if (ec) {
+      LOG(E, "Cannot create directory '" << out.parent_path().string() << "': " << ec.message());
+      return false;
+    }
+  }
+
+  std::ofstream file(path, std::ios::binary);
+  if (!file) {
+    LOG(E, "Cannot open '" << path << "' for writing.");
+    return false;
+  }
+
+  const size_t n = cloud.size();
+  file << "# .PCD v0.7 - Point Cloud Data file format\n"
+       << "VERSION 0.7\n"
+       << "FIELDS x y z\n"
+       << "SIZE 4 4 4\n"
+       << "TYPE F F F\n"
+       << "COUNT 1 1 1\n"
+       << "WIDTH " << n << "\n"
+       << "HEIGHT 1\n"
+       << "VIEWPOINT 0 0 0 1 0 0 0\n"
+       << "POINTS " << n << "\n"
+       << "DATA binary\n";
+
+  // The cloud stores doubles; PCD consumers expect float32, so convert in a
+  // buffer rather than writing the Eigen storage straight out.
+  std::vector<float> buffer(3 * n);
+  for (size_t i = 0; i < n; ++i) {
+    buffer[3 * i + 0] = static_cast<float>(cloud[i].x());
+    buffer[3 * i + 1] = static_cast<float>(cloud[i].y());
+    buffer[3 * i + 2] = static_cast<float>(cloud[i].z());
+  }
+  file.write(reinterpret_cast<const char*>(buffer.data()),
+             static_cast<std::streamsize>(buffer.size() * sizeof(float)));
+  if (!file) {
+    LOG(E, "Failed while writing '" << path << "'.");
+    return false;
+  }
+  return true;
+}
 
 // Width of the dashboard table (characters between the border bars).
 constexpr int kDashWidth = 55;

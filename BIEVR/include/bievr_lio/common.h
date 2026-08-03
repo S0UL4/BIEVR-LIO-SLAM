@@ -157,6 +157,18 @@ struct Odometry {
   V3 angular_velocity;  // angular velocity expressed in the body frame
 };
 
+// One entry of a published Path: a map/world-frame pose with its own stamp.
+struct StampedPose {
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+  uint64_t stamp;
+  Transform pose;  // T_W_B
+};
+
+// Trajectory of stamped poses, accumulated for publishing as a path message.
+struct Path {
+  std::vector<StampedPose> poses;
+};
+
 template <typename PointT>
 inline PointcloudBase<PointT> operator*(const Transform& T, PointcloudBase<PointT> P) {
   P.points() = T * P.points().colwise().homogeneous();

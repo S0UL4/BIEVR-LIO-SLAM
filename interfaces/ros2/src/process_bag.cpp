@@ -15,6 +15,7 @@
 
 #include "bievr_lio/config_loader.h"
 #include "bievr_lio_ros2/publisher.h"
+#include "bievr_lio_ros2/save_map_service.h"
 #include "bievr_ros_common/conversions.h"
 #ifdef BIEVR_WITH_LIVOX
 #include <livox_ros_driver2/msg/custom_msg.hpp>
@@ -51,6 +52,7 @@ int main(int argc, char** argv) {
   auto pipeline = std::make_shared<bievr::Pipeline>(config.pipeline_config);
   auto synchronizer = std::make_shared<bievr::Synchronizer>(pipeline);
   auto lio_pub = std::make_shared<bievr::Publisher>(node, pipeline, "bievr_lio");
+  bievr::SaveMapService save_map_srv(node, pipeline);
 
   rosbag2_cpp::Reader reader;
   reader.open(config.topic_config.bag_path);
@@ -94,11 +96,22 @@ int main(int argc, char** argv) {
       bievr::msgToImuMeasurement(msg, imu);
       synchronizer->addImu(imu);
     }
+
+    // Bag playback never spins, so serve any pending save_map call here.
+    rclcpp::spin_some(node);
   }
 
   LOG(I, "Done with bag.");
   reader.close();
   LOG(I, "Bag closed");
+
+  // The node exits as soon as the bag is exhausted, which leaves no chance to
+  // call the service afterwards. Save on the way out when a destination was
+  // configured -- the same "empty path means don't write" rule the trajectory
+  // log uses.
+  if (!config.pipeline_config.map_save_path.empty()) {
+    pipeline->saveMap("");
+  }
 
   rclcpp::shutdown();
   return 0;

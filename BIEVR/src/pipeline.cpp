@@ -14,6 +14,10 @@ namespace bievr {
 Pipeline::Pipeline(const Config& config) : config_(config) {
   map_ = std::make_shared<BIEVRMap>(config_.map);
 
+  if (config_.accumulate_map) {
+    map_accumulator_ = std::make_unique<MapAccumulator>(config_.map_save_resolution);
+  }
+
   if (!config_.log_path.empty()) {
     LOG(I, "Logging to " << config_.log_path);
     tum_log_ = std::make_shared<std::ofstream>(config_.log_path, std::ios::trunc);
@@ -230,6 +234,7 @@ void Pipeline::tryInitMap(uint64_t stamp, const State& x_j_pred, const Transform
   map_->integratePoints(registered, &ranges);
   addState(stamp, x_j_pred.quat, x_j_pred.p, x_j_pred.v);
   publishLatestState(header);
+  accumulateMap(registered);
   publish(IntensityPointcloud(registered, intensities), header, "points/registered");
   if (map_->size() > config_.map_size_running_threshold) {
     phase_ = Phase::Running;
@@ -348,6 +353,7 @@ void Pipeline::publishFrame(const Header& header, const Transform& T_W_I,
     publishDebugClouds(source_filtered, source_coarse, source_fine, undistorted, intensities, T_W_I,
                        header);
   }
+  accumulateMap(full_registered);
   publish(IntensityPointcloud(full_registered, intensities), header, "points/registered");
   publishLatestState(header);
 }
@@ -369,6 +375,38 @@ void Pipeline::publishLatestState(const Header& header) {
   publish(odom, header, "odom", config_.body_frame);
   publish(acc_bias_, header, "bias/acc");
   publish(gyro_bias_, header, "bias/gyro");
+  publishPath(odom.pose, header);
+}
+
+void Pipeline::accumulateMap(const Pointcloud& registered) {
+  // Copies the cloud into the worker's queue and returns; the hashing itself
+  // happens off the odometry thread.
+  if (map_accumulator_) map_accumulator_->add(registered);
+}
+
+bool Pipeline::saveMap(const std::string& path, std::string* written_path) const {
+  if (!map_accumulator_) {
+    LOG(E, "Cannot save map: accumulation is disabled (map_save.accumulate).");
+    return false;
+  }
+
+  std::string out = path.empty() ? config_.map_save_path : path;
+  if (out.empty()) out = "bievr_map.pcd";
+
+  if (!map_accumulator_->save(out)) return false;
+  if (written_path != nullptr) *written_path = out;
+  return true;
+}
+
+void Pipeline::publishPath(const Transform& pose, const Header& header) {
+  if (!config_.publish_path) return;
+
+  path_.poses.push_back(StampedPose{header.stamp, pose});
+  if (config_.max_path_poses > 0 && path_.poses.size() > config_.max_path_poses) {
+    const size_t excess = path_.poses.size() - config_.max_path_poses;
+    path_.poses.erase(path_.poses.begin(), path_.poses.begin() + excess);
+  }
+  publish(path_, header, "path");
 }
 
 void Pipeline::publishDebugClouds(const Pointcloud& source_filtered,
@@ -379,9 +417,9 @@ void Pipeline::publishDebugClouds(const Pointcloud& source_filtered,
   Pointcloud source_registered = T_W_I * source_filtered;
   Pointcloud fine_registered = T_W_I * source_fine;
   Pointcloud coarse_registered = T_W_I * source_coarse;
-  publish(fine_registered, header, "points/fine");
-  publish(coarse_registered, header, "points/coarse");
-  publish(source_registered, header, "points/effective");
+  //publish(fine_registered, header, "points/fine");
+  //publish(coarse_registered, header, "points/coarse");
+  //publish(source_registered, header, "points/effective");
   Header body_header = header;
   body_header.frame = config_.body_frame;
   // The undistorted cloud keeps its original point order, so the snapshotted

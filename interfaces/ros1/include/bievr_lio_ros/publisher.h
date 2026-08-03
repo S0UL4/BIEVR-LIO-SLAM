@@ -4,6 +4,7 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/Vector3Stamped.h>
 #include <nav_msgs/Odometry.h>
+#include <nav_msgs/Path.h>
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <tf/transform_broadcaster.h>
@@ -53,6 +54,7 @@ struct RosBackend {
   using TypedPublisher = bievr::TypedPublisher;
   using PointCloud2 = sensor_msgs::PointCloud2;
   using Odometry = nav_msgs::Odometry;
+  using Path = nav_msgs::Path;
   using Vector3Stamped = geometry_msgs::Vector3Stamped;
   using TransformStamped = geometry_msgs::TransformStamped;
 

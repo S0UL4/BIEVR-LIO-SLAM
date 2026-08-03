@@ -20,12 +20,21 @@ imu:
     t_init: 0.2 # Time to initialize bias and gravity [s]
     frame: "imu"
 
+path:
+  publish: True # Publish the accumulated trajectory as a nav_msgs/Path
+  max_poses: 10000 # Poses kept in the path (0 = unlimited); oldest are dropped once reached
+
+map_save:
+  accumulate: True # Accumulate registered scans so the save_map service has something to write
+  resolution_m: 0.1 # Voxel size the accumulated cloud is thinned to [m]
+  path: "" # Destination of the save_map service. Empty = ./bievr_map.pcd
+
 debug:
-  publish_all_clouds: False # Publish all clouds (fine, coarse, deskewed)
+  publish_all_clouds: True # Publish all clouds (fine, coarse, deskewed)
   timing: False
   log: False
   dashboard: True # Fancy live status print (position, biases, timing, ...)
   dashboard_ascii_path: "" # ASCII art for the dashboard. Empty = bievr_ascii.txt next to the config.
-  trajectory_path: "" # Path to save trajectory. If empty, logs will not be saved.
+  trajectory_path: "/home/soula/Desktop/PROJECTS/test_slams/src/BIEVR-LIO-SLAM/output/path_bievr" # Path to save trajectory. If empty, logs will not be saved.
 
 max_num_threads: 0 # 0 = automatic, >0 = number of threads to use for parallel processing
