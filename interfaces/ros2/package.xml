@@ -13,6 +13,7 @@
 
   <depend>bievr_lio</depend>
   <depend>bievr_ros_common</depend>
+  <depend>bievr_pgo</depend>
   <depend>yaml_cpp_vendor</depend>
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>

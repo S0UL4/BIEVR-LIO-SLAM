@@ -67,7 +67,7 @@ def generate_launch_description():
         DeclareLaunchArgument('rosbag',
                               description='Path to the rosbag2 directory to replay'),
         DeclareLaunchArgument(
-            'rviz', default_value='false',
+            'rviz', default_value='true',
             description='Launch RViz2 with the bievr_lio visualization config.'),
         OpaqueFunction(function=launch_setup),
     ])

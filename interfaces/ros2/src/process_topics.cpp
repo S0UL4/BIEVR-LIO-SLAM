@@ -19,6 +19,9 @@
 #ifdef BIEVR_WITH_LIVOX
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 #endif
+#ifdef BIEVR_WITH_PGO
+#include "bievr_lio_ros2/loop_closure.h"
+#endif
 
 using namespace std::chrono_literals;
 
@@ -45,6 +48,22 @@ int main(int argc, char** argv) {
   auto synchronizer = std::make_shared<bievr::Synchronizer>(pipeline);
   auto lio_pub = std::make_shared<bievr::Publisher>(node, pipeline, "bievr_lio");
   bievr::SaveMapService save_map_srv(node, pipeline);
+
+#ifdef BIEVR_WITH_PGO
+  // Loop closure is a downstream observer: off unless `loop_closure.enable` is
+  // set, and it never writes back into the odometry.
+  std::unique_ptr<bievr::LoopClosure> loop_closure;
+  bievr::LoopClosureConfig loop_closure_config;
+  if (!bievr::loadLoopClosureConfig(config.yaml_paths, loop_closure_config)) {
+    LOG(E, "Failed to load loop closure config.");
+    return -1;
+  }
+  if (loop_closure_config.enable) {
+    loop_closure = std::make_unique<bievr::LoopClosure>(node, pipeline, loop_closure_config,
+                                                        "bievr_lio");
+    LOG(I, "Loop closure enabled.");
+  }
+#endif
 
   // ROS2 has no ShapeShifter: discover the pointcloud topic's type from the
   // graph, then use a generic (serialized) subscription to handle whichever of
@@ -110,7 +129,12 @@ int main(int argc, char** argv) {
         synchronizer->addImu(imu);
       });
 
-  rclcpp::spin(node);
+  // Multi-threaded so the loop closure's map save and map publish can run off
+  // the sensor callbacks. Everything else stays in the node's default
+  // (mutually exclusive) group, so it is still serialized exactly as before.
+  rclcpp::executors::MultiThreadedExecutor executor;
+  executor.add_node(node);
+  executor.spin();
   rclcpp::shutdown();
   return 0;
 }

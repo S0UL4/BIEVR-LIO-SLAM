@@ -36,6 +36,10 @@ find_package(yaml-cpp REQUIRED)    # shared config_loader.h parses plain YAML fi
 # Livox is optional: only livox_ros_driver2 exists for ROS2.
 find_package(livox_ros_driver2 QUIET)
 
+# Loop closure is optional: without bievr_pgo (GTSAM + PCL) the odometry still
+# builds and runs, it just cannot be enabled from the config.
+find_package(bievr_pgo QUIET)
+
 set(ament_dependencies
   rclcpp
   sensor_msgs
@@ -78,7 +82,17 @@ foreach(target process_topics process_bag)
   if(livox_ros_driver2_FOUND)
     target_compile_definitions(${target} PRIVATE BIEVR_WITH_LIVOX)
   endif()
+  if(bievr_pgo_FOUND)
+    target_compile_definitions(${target} PRIVATE BIEVR_WITH_PGO)
+    target_link_libraries(${target} bievr_pgo::bievr_pgo)
+  endif()
 endforeach()
+
+if(bievr_pgo_FOUND)
+  message(STATUS "bievr_lio_ros2: bievr_pgo found, loop closure available.")
+else()
+  message(STATUS "bievr_lio_ros2: bievr_pgo NOT found, building without loop closure.")
+endif()
 
 # ---- Install ----
 install(TARGETS process_topics process_bag
