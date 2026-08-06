@@ -390,7 +390,8 @@ void Pipeline::accumulateMap(const Pointcloud& registered) {
   if (map_accumulator_) map_accumulator_->add(registered);
 }
 
-bool Pipeline::saveMap(const std::string& path, std::string* written_path) const {
+bool Pipeline::saveMap(const std::string& path, std::string* written_path,
+                       size_t* num_points) const {
   if (!map_accumulator_) {
     LOG(E, "Cannot save map: accumulation is disabled (map_save.accumulate).");
     return false;
@@ -399,7 +400,7 @@ bool Pipeline::saveMap(const std::string& path, std::string* written_path) const
   std::string out = path.empty() ? config_.map_save_path : path;
   if (out.empty()) out = "bievr_map.pcd";
 
-  if (!map_accumulator_->save(out)) return false;
+  if (!map_accumulator_->save(out, num_points)) return false;
   if (written_path != nullptr) *written_path = out;
   return true;
 }

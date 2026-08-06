@@ -8,9 +8,11 @@
 //
 // Trigger carries no request fields, so the destination comes from the YAML
 // config (map_save.path, empty = ./bievr_map.pcd); the response reports the
-// path actually written. The service callback runs on the node's executor,
-// which is single-threaded in both wrapper executables, so it never overlaps
-// with the pipeline callbacks that fill the map.
+// path actually written. Writing a long session's map takes seconds, so the
+// callback gets its own group rather than the node's default one: under a
+// MultiThreadedExecutor it then runs alongside the sensor callbacks instead of
+// stalling the odometry. MapAccumulator::save copies the map under its lock and
+// writes outside it, so overlapping with a live feed is safe.
 
 #include <bievr_lio/pipeline.h>
 
@@ -26,22 +28,25 @@ class SaveMapService {
  public:
   SaveMapService(rclcpp::Node::SharedPtr node, std::shared_ptr<const Pipeline> pipeline)
       : pipeline_(std::move(pipeline)) {
+    group_ = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     srv_ = node->create_service<std_srvs::srv::Trigger>(
         "~/save_map",
         [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
           std::string written;
-          response->success = pipeline_->saveMap("", &written);
+          size_t num_points = 0;
+          response->success = pipeline_->saveMap("", &written, &num_points);
           response->message =
               response->success
-                  ? "Saved " + std::to_string(pipeline_->accumulatedMapSize()) + " points to " +
-                        written
+                  ? "Saved " + std::to_string(num_points) + " points to " + written
                   : "Failed to save map; see the node log for the reason.";
-        });
+        },
+        rclcpp::ServicesQoS(), group_);
   }
 
  private:
   std::shared_ptr<const Pipeline> pipeline_;
+  rclcpp::CallbackGroup::SharedPtr group_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr srv_;
 };
 

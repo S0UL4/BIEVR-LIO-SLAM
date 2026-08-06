@@ -39,7 +39,7 @@ class MapAccumulator {
 
   // Snapshots the map and writes it as a binary PCD. Returns false if nothing
   // has been accumulated yet or the file cannot be written.
-  bool save(const std::string& path) const;
+  bool save(const std::string& path, size_t* num_points = nullptr) const;
 
   size_t size() const;
   size_t droppedScans() const;

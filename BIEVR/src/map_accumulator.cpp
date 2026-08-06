@@ -69,7 +69,7 @@ void MapAccumulator::run() {
   }
 }
 
-bool MapAccumulator::save(const std::string& path) const {
+bool MapAccumulator::save(const std::string& path, size_t* num_points) const {
   Pointcloud cloud;
   {
     std::lock_guard<std::mutex> lock(map_mutex_);
@@ -85,6 +85,7 @@ bool MapAccumulator::save(const std::string& path) const {
   }
 
   if (!savePointcloudPCD(cloud, path)) return false;
+  if (num_points != nullptr) *num_points = cloud.size();
   LOG(I, "Saved map with " << cloud.size() << " points to '" << path << "'.");
   return true;
 }

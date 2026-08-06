@@ -57,9 +57,12 @@ class Pipeline {
 
   // Writes the accumulated registered cloud as a binary PCD. An empty `path`
   // falls back to config.map_save_path (itself defaulting to ./bievr_map.pcd).
-  // On success `written_path` reports where it landed. Fails if nothing has
-  // been accumulated yet.
-  bool saveMap(const std::string& path, std::string* written_path = nullptr) const;
+  // On success `written_path` reports where it landed and `num_points` how many
+  // points were written. Fails if nothing has been accumulated yet.
+  // Safe to call while the odometry runs: the map is snapshotted under a lock
+  // and written outside it.
+  bool saveMap(const std::string& path, std::string* written_path = nullptr,
+               size_t* num_points = nullptr) const;
 
   // Number of points currently held in the accumulated map.
   size_t accumulatedMapSize() const { return map_accumulator_ ? map_accumulator_->size() : 0; }
