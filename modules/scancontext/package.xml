@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>bievr_scancontext</name>
+  <version>0.0.0</version>
+  <description>Scan Context place descriptor, shared by the mapping and localization modules</description>
+
+  <maintainer email="ihebtn5@gmail.com">soula</maintainer>
+
+  <license>TODO</license>
+
+  <buildtool_depend>cmake</buildtool_depend>
+
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>

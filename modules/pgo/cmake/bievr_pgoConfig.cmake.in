@@ -1,0 +1,17 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+if(NOT TARGET Eigen3::Eigen)
+  find_dependency(Eigen3)
+endif()
+if(NOT TARGET gtsam)
+  find_dependency(GTSAM)
+endif()
+find_dependency(PCL COMPONENTS common io filters registration)
+find_dependency(bievr_lio)
+find_dependency(bievr_scancontext)
+
+include("${CMAKE_CURRENT_LIST_DIR}/bievr_pgoTargets.cmake")
+
+check_required_components(bievr_pgo)

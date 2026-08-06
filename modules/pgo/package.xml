@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>bievr_pgo</name>
+  <version>0.0.0</version>
+  <description>Scan Context loop closure and GTSAM pose graph, downstream of the BIEVR odometry</description>
+
+  <maintainer email="ihebtn5@gmail.com">soula</maintainer>
+
+  <license>TODO</license>
+
+  <buildtool_depend>cmake</buildtool_depend>
+
+  <depend>bievr_lio</depend>
+  <depend>bievr_scancontext</depend>
+
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>
