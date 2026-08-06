@@ -42,6 +42,9 @@ struct Config {
   // Upper bound on threads used for TBB parallel regions. 0 = let TBB decide
   // (use all available cores); >0 caps parallelism to that many threads.
   int max_num_threads = 0;
+  // Files this config was loaded from, in override order. Optional modules parse
+  // their own sections from the same files without re-deriving the paths.
+  std::vector<std::string> yaml_paths;
 };
 
 namespace config_internal {
@@ -212,6 +215,7 @@ inline bool loadConfigFromYaml(const std::vector<std::string>& yaml_paths, Confi
       LOG(E, "Failed to load YAML config '" << path << "': " << e.what());
       return false;
     }
+    config.yaml_paths.push_back(path);
   }
 
   auto& tc = config.topic_config;
