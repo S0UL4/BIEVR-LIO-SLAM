@@ -560,12 +560,33 @@ void vecToMsg(const V3& vec, Vec3MsgT& msg) {
 // Livox CustomMsg -> StampedIntensityPointcloud. The only per-distro overloads:
 // the gen1/gen2 messages are structurally identical (so they can't be told apart
 // generically) and disagree on the scan base-stamp field (gen1: header stamp;
-// gen2: `timebase`). Gated by the BIEVR_WITH_LIVOX[2] compile definitions.
+// gen2: `timebase`, falling back to the header stamp when it is not host time).
+// Gated by the BIEVR_WITH_LIVOX[2] compile definitions.
 #ifdef BIEVR_ROS_COMMON_ROS2
 #ifdef BIEVR_WITH_LIVOX  // ROS2 has only the gen2 driver (livox_ros_driver2)
 inline bool msgToPointcloud(const livox_ros_driver2::msg::CustomMsg& pointcloud_msg,
                             StampedIntensityPointcloud& stamped_pointcloud) {
-  return conv_detail::livoxToStampedIntensity(pointcloud_msg, pointcloud_msg.timebase,
+  // `timebase` is on the host clock only when the sensor is time-synced; otherwise it is a raw
+  // device counter (e.g. bags converted from the gen1 driver, where it holds sensor uptime). The
+  // header stamp is always host time, so use it as the reference and fall back to it when the two
+  // disagree - the synchronizer compares this stamp against IMU stamps, which are host time.
+  constexpr uint64_t kMaxTimebaseSkewNs = 1'000'000'000ULL;
+  const uint64_t header_ns = conv_detail::stampToNs(pointcloud_msg.header.stamp);
+  const uint64_t timebase_ns = pointcloud_msg.timebase;
+  const uint64_t skew =
+      timebase_ns > header_ns ? timebase_ns - header_ns : header_ns - timebase_ns;
+
+  uint64_t base_stamp_ns = timebase_ns;
+  if (skew >= kMaxTimebaseSkewNs) {
+    LOG_FIRST(W, 1,
+              "Livox `timebase` " << timebase_ns << " disagrees with header stamp " << header_ns
+                                  << " by " << nsToS(skew)
+                                  << " s; the sensor is likely not time-synced. Using the header "
+                                     "stamp as the scan base.");
+    base_stamp_ns = header_ns;
+  }
+
+  return conv_detail::livoxToStampedIntensity(pointcloud_msg, base_stamp_ns,
                                               "00_conversion_livox2", stamped_pointcloud);
 }
 #endif
@@ -580,7 +601,27 @@ inline bool msgToPointcloud(const livox_ros_driver::CustomMsg& pointcloud_msg,
 #ifdef BIEVR_WITH_LIVOX2  // gen2: base stamp in `timebase`
 inline bool msgToPointcloud(const livox_ros_driver2::CustomMsg& pointcloud_msg,
                             StampedIntensityPointcloud& stamped_pointcloud) {
-  return conv_detail::livoxToStampedIntensity(pointcloud_msg, pointcloud_msg.timebase,
+  // `timebase` is on the host clock only when the sensor is time-synced; otherwise it is a raw
+  // device counter (e.g. bags converted from the gen1 driver, where it holds sensor uptime). The
+  // header stamp is always host time, so use it as the reference and fall back to it when the two
+  // disagree - the synchronizer compares this stamp against IMU stamps, which are host time.
+  constexpr uint64_t kMaxTimebaseSkewNs = 1'000'000'000ULL;
+  const uint64_t header_ns = conv_detail::stampToNs(pointcloud_msg.header.stamp);
+  const uint64_t timebase_ns = pointcloud_msg.timebase;
+  const uint64_t skew =
+      timebase_ns > header_ns ? timebase_ns - header_ns : header_ns - timebase_ns;
+
+  uint64_t base_stamp_ns = timebase_ns;
+  if (skew >= kMaxTimebaseSkewNs) {
+    LOG_FIRST(W, 1,
+              "Livox `timebase` " << timebase_ns << " disagrees with header stamp " << header_ns
+                                  << " by " << nsToS(skew)
+                                  << " s; the sensor is likely not time-synced. Using the header "
+                                     "stamp as the scan base.");
+    base_stamp_ns = header_ns;
+  }
+
+  return conv_detail::livoxToStampedIntensity(pointcloud_msg, base_stamp_ns,
                                               "00_conversion_livox2", stamped_pointcloud);
 }
 #endif
