@@ -1,0 +1,13 @@
+topics:
+  pointcloud: "/ouster/points"
+  imu: "/imu/data"
+
+calibration: # T_IMU_LIDAR (LiDAR -> IMU)
+  translation: [ 0.0494328949, 0.0147877904, 0.6079887122 ]
+  rotation: [1, 0.03194161690749185, -0.00698788259543323,
+             -0.03200263570684775, 1, -0.008798074077210848,
+             0.006703021917434096, 0, 1]
+
+lidar:
+  min_range_m: 0.5 # Exclude points closer than this range [m]
+  max_range_m: 200 # Exclude points farther than this range [m]
