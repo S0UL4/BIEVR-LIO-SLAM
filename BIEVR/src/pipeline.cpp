@@ -350,12 +350,18 @@ void Pipeline::publishFrame(const Header& header, const Transform& T_W_I,
                             const Pointcloud& source_coarse, const Pointcloud& source_fine,
                             const Pointcloud& undistorted, const IntensityView& intensities) {
   if (config_.publish_all_clouds) {
-    publishDebugClouds(source_filtered, source_coarse, source_fine, undistorted, intensities, T_W_I,
+    publishDebugClouds(source_filtered, source_coarse, source_fine, intensities, T_W_I,
                        header);
   }
   accumulateMap(full_registered);
   publish(IntensityPointcloud(full_registered, intensities), header, "points/registered");
+  Header body_header = header;
+  body_header.frame = config_.body_frame;
+  // The undistorted cloud keeps its original point order, so the snapshotted
+  // intensity row still lines up with it.
+  publish(IntensityPointcloud(undistorted, intensities), body_header, "points/undistorted");
   publishLatestState(header);
+  if (frame_observer_) frame_observer_(header.stamp, T_W_I, undistorted);
 }
 
 void Pipeline::publishLatestState(const Header& header) {
@@ -411,20 +417,19 @@ void Pipeline::publishPath(const Transform& pose, const Header& header) {
 
 void Pipeline::publishDebugClouds(const Pointcloud& source_filtered,
                                   const Pointcloud& source_coarse, const Pointcloud& source_fine,
-                                  const Pointcloud& undistorted_cloud,
                                   const IntensityView& intensities, const Transform& T_W_I,
                                   const Header& header) {
   Pointcloud source_registered = T_W_I * source_filtered;
   Pointcloud fine_registered = T_W_I * source_fine;
   Pointcloud coarse_registered = T_W_I * source_coarse;
-  //publish(fine_registered, header, "points/fine");
-  //publish(coarse_registered, header, "points/coarse");
-  //publish(source_registered, header, "points/effective");
-  Header body_header = header;
-  body_header.frame = config_.body_frame;
+  publish(fine_registered, header, "points/fine");
+  publish(coarse_registered, header, "points/coarse");
+  publish(source_registered, header, "points/effective");
+  // Header body_header = header;
+  // body_header.frame = config_.body_frame;
   // The undistorted cloud keeps its original point order, so the snapshotted
   // intensity row still lines up with it.
-  publish(IntensityPointcloud(undistorted_cloud, intensities), body_header, "points/undistorted");
+  // publish(IntensityPointcloud(undistorted_cloud, intensities), body_header, "points/undistorted");
 }
 
 void Pipeline::logTUM(double timestamp, const Transform& pose) {

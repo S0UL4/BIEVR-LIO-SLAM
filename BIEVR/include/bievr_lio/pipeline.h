@@ -50,6 +50,8 @@ class Pipeline {
   explicit Pipeline(const Config& config);
   virtual ~Pipeline() = default;
 
+  const Config& config() const { return config_; }
+
   void processFrame(const std::vector<ImuMeasurement>& imu_data,
                     const StampedIntensityPointcloud& pointcloud);
 
@@ -72,6 +74,13 @@ class Pipeline {
     };
     publishers_[typeid(T)] = wrapper;
   }
+
+  // Optional consumer of every registered frame, for downstream modules (loop
+  // closure, localization). Called on the odometry thread, so it must copy and
+  // return rather than do work inline. Unset by default.
+  using FrameObserver = std::function<void(uint64_t stamp, const Transform& T_W_I,
+                                           const Pointcloud& undistorted_I)>;
+  void setFrameObserver(FrameObserver observer) { frame_observer_ = std::move(observer); }
 
  private:
   enum class Phase { NeedBias, NeedMap, Running };
@@ -109,7 +118,7 @@ class Pipeline {
   void publishPath(const Transform& pose, const Header& header);
   void accumulateMap(const Pointcloud& registered);
   void publishDebugClouds(const Pointcloud& source_filtered, const Pointcloud& source_coarse,
-                          const Pointcloud& source_fine, const Pointcloud& undistorted_cloud,
+                          const Pointcloud& source_fine,
                           const IntensityView& intensities, const Transform& T_W_I,
                           const Header& header);
 
@@ -141,6 +150,7 @@ class Pipeline {
   using PublishFunction =
       std::function<void(const void*, const Header&, const std::string&, const std::string&)>;
   std::unordered_map<std::type_index, PublishFunction> publishers_;
+  FrameObserver frame_observer_;
   std::shared_ptr<std::ofstream> tum_log_;
 
   // Accumulated state for the live status dashboard (printDashboard in utils).

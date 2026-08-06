@@ -22,15 +22,72 @@ imu:
 
 path:
   publish: True # Publish the accumulated trajectory as a nav_msgs/Path
-  max_poses: 10000 # Poses kept in the path (0 = unlimited); oldest are dropped once reached
+  max_poses: 0 # Poses kept in the path (0 = unlimited); oldest are dropped once reached
 
-map_save:
+map_save: # THIS IS FOR THE PURE ODOMETRY MAP, NOT THE LOOP-CLOSED ONE. Use the bundle_path to save the loop-closed map.
   accumulate: True # Accumulate registered scans so the save_map service has something to write
-  resolution_m: 0.1 # Voxel size the accumulated cloud is thinned to [m]
-  path: "" # Destination of the save_map service. Empty = ./bievr_map.pcd
+  resolution_m: 0.05 # Voxel size the accumulated cloud of the pure odometry
+  path: "bievr_map.pcd" # Becareful, this is the pure odometry map, not the loop-closed one. Use the bundle_path to save the loop-closed map.
+
+loop_closure: # Scan Context + GTSAM pose graph, downstream of the odometry (bievr_pgo)
+  enable: True # Off means the odometry runs exactly as before
+
+  keyframe_meter_gap: 1.0 # Keep a keyframe every k m of travel
+  keyframe_deg_gap: 15.0 # ...or every k deg of rotation
+  keyframe_filter_size: 0.4 # Voxel leaf of the stored keyframe cloud [m]
+  icp_filter_size: 0.4 # Voxel leaf of the loop-closure submap [m]
+
+  # Scan Context descriptor
+  sc_num_rings: 20
+  sc_num_sectors: 60
+  sc_max_radius: 80.0 # 80 outdoor; 20-40 indoor
+  # Added to every point's z. Must exceed the depth of the lowest surface below
+  # the sensor, with margin: too small and ground bins go negative and collide
+  # with the 0 that marks an empty bin, which measurably worsens matching.
+  sc_lidar_height: 2.0
+  sc_num_exclude_recent: 30 # Keyframes before the query that cannot close a loop ( the gap lets stay )
+  sc_num_candidates: 3
+  sc_search_ratio: 0.1
+  sc_dist_threshold: 0.5 # 0.1-0.15 for fewer false loops
+  sc_tree_making_period: 30 # Rebuild the kd-tree every N queries
+  loop_detect_frequency: 1.0 # Hz
+
+  # Loop constraint via ICP
+  history_keyframe_search_num: 25 # [-N, N] keyframes stacked into the target submap
+  icp_max_correspondence_distance: 150.0
+  icp_max_iterations: 100
+  icp_transformation_epsilon: 1.0e-6
+  icp_euclidean_fitness_epsilon: 1.0e-6
+  icp_ransac_iterations: 0
+  loop_fitness_score_threshold: 0.2 # Reject loops scoring above this
+  # Seed ICP with Scan Context's yaw instead of identity. Measured worse on the
+  # reference session (1.981 -> 2.156 m RMSE); only useful when revisits run in
+  # the opposite direction, where identity cannot converge.
+  use_sc_yaw_guess: False
+  sc_yaw_guess_min_deg: 45.0
+
+  # Factor graph noise (variances)
+  prior_noise_score: 1.0e-12
+  odom_noise_rotation: 1.0e-6
+  odom_noise_translation: 1.0e-4
+  loop_noise_score: 0.5
+  loop_noise_cauchy_c: 1.0
+
+  isam_relinearize_threshold: 0.01
+  isam_relinearize_skip: 1
+  isam_frequency: 10.0 # Hz
+
+  max_queue: 8 # Pending keyframes before the oldest are dropped
+  map_save_resolution: 0.1 # Voxel leaf of the saved/published map [m]; <=0 = full res
+  path_publish_frequency: 10.0 # Hz
+  map_publish_frequency: 0.1 # Hz (the map is heavy)
+  # Destination of the map bundle (cloud.pcd, poses_tum.txt, scan_context.bin,
+  # meta.yaml). Relative paths resolve against the working directory. Empty means
+  # process_bag does not auto-save; the save_map_bundle service still works.
+  bundle_path: "/home/soula/Desktop/PROJECTS/test_slams/test_biever_bundle"
 
 debug:
-  publish_all_clouds: True # Publish all clouds (fine, coarse, deskewed)
+  publish_all_clouds: False # Publish all clouds (fine, coarse, deskewed)
   timing: False
   log: False
   dashboard: True # Fancy live status print (position, biases, timing, ...)
