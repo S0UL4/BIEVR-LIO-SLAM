@@ -22,7 +22,11 @@ find_package(yaml-cpp REQUIRED)
 find_package(bievr_lio REQUIRED)
 find_package(bievr_scancontext REQUIRED)
 
-add_library(${PROJECT_NAME} src/prior_map.cpp)
+add_library(${PROJECT_NAME}
+  src/cloud_utils.cpp
+  src/prior_map.cpp
+  src/tile_map.cpp
+)
 add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
 
 target_include_directories(${PROJECT_NAME} PUBLIC

@@ -11,19 +11,17 @@
 // requirement.
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
-
 #include "bievr_lio/common.h"
+#include "bievr_map_io/cloud_utils.h"
+#include "bievr_map_io/tile_map.h"
 #include "bievr_scancontext/scan_context.h"
 
 namespace bievr {
-
-using MapCloud = pcl::PointCloud<pcl::PointXYZ>;
 
 // How the map was built. Everything here has a usable default, because a bare
 // PCD carries none of it.
@@ -48,12 +46,17 @@ struct Relocalization {
   std::vector<uint64_t> stamps;
 };
 
+// Exactly one of `cloud` and `tiles` is set: the map is either held whole or
+// paged in a tile at a time. Consumers that only ever ask for points near a pose
+// should prefer `tiles`; `cloud` is the fallback for maps that cannot be tiled.
 struct PriorMap {
   MapCloud::Ptr cloud;
+  std::shared_ptr<TileMap> tiles;
   std::optional<Relocalization> reloc;
   MapMeta meta;
 
   bool canRelocalize() const { return reloc.has_value(); }
+  bool tiled() const { return tiles != nullptr; }
 };
 
 struct LoadOptions {
@@ -61,17 +64,17 @@ struct LoadOptions {
   // effect -- ScanContext::load adopts rings/sectors/radius/height from the file,
   // since descriptors are only comparable under the geometry that built them.
   ScanContext::Config scan_context;
-  // Voxel leaf applied to the loaded cloud, <= 0 keeps it as stored. A foreign
-  // PCD can have any density; normalising it here keeps ICP predictable.
+  // Voxel leaf applied to the map, <= 0 keeps it as stored. A foreign PCD can
+  // have any density; normalising it here keeps ICP predictable.
   double voxel_size_m = 0.0;
+  // Tile cache. When one can be built the cloud is never read whole again: only
+  // the index and the overview are resident, and the consumer pages tiles in.
+  // <= 0 disables tiling and loads the cloud.
+  double tile_size_m = 100.0;
+  // Leaf of the overview cloud kept for display. <= 0 keeps every point, which
+  // for a large map means holding it all just to draw it.
+  double overview_voxel_size_m = 0.4;
 };
-
-// Voxel downsample, one centroid per occupied voxel. Used instead of
-// pcl::VoxelGrid because that one indexes its grid with an int32 and, when
-// extent/leaf overflows it, silently returns the cloud *unfiltered* -- which a
-// 1 km map at a 0.3 m leaf does. Keys here are per-axis int64, so only the
-// occupied voxels cost anything and the extent is irrelevant.
-MapCloud::Ptr voxelDownsample(const MapCloud& cloud, double leaf_m);
 
 // `path` is either a .pcd file (cloud only) or a bundle directory. A directory
 // whose scan_context.bin / poses_tum.txt are missing or inconsistent still

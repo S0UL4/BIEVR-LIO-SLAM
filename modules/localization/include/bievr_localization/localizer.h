@@ -19,9 +19,11 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/search/kdtree.h>
 
 #include "bievr_lio/common.h"
 #include "bievr_map_io/prior_map.h"
@@ -39,13 +41,21 @@ class Localizer {
     std::string map_path;
     std::string map_frame = "map";
 
-    double map_voxel_size_m = 0.0;    // leaf applied to the prior map on load, <=0 keeps it
+    double map_voxel_size_m = 0.0;    // leaf the prior map is held at, <=0 keeps it
     // Coarser leaf for the published copy. Display needs nowhere near the
     // density ICP does, and this is the difference between a message RViz can
     // draw and one it chokes on.
     double map_viz_voxel_size_m = 0.4;
     double scan_voxel_size_m = 0.5;   // leaf applied to the ICP source scan
-    double crop_radius_m = 150.0;     // prior-map crop around the predicted pose
+    // Side of one prior-map tile. The ICP target is the ring of tiles around the
+    // fix, so this and crop_radius_m together decide how much map is resident.
+    // <=0 disables tiling and holds the whole cloud.
+    double tile_size_m = 100.0;
+    // How much map to keep around the fix. Rounded *up* to whole tiles:
+    // ring = ceil(crop_radius_m / tile_size_m), which at 150/100 is a 5x5 block,
+    // not 3x3 -- too small a ring truncates the ICP target near a tile edge and
+    // shows up only as unexplained fitness spikes.
+    double crop_radius_m = 150.0;
     double correction_frequency = 0.5;  // Hz
 
     // Coarse-to-fine ICP. The coarse pass reruns at `coarse_scale` times the
@@ -147,8 +157,12 @@ class Localizer {
   // Descriptor match against the prior map, or nullopt when unavailable.
   std::optional<Transform> relocalize(const PendingFrame& frame);
 
-  // Prior-map points within crop_radius_m of `centre`, voxel-thinned by `scale`.
-  Cloud::Ptr cropAround(const Point& centre, double scale) const;
+  // Pages the ring of tiles around `centre` in and everything past ring + 1 out,
+  // rebuilding the ICP targets and their search trees only when the resident set
+  // actually changed. False when there is no map under `centre` to match against.
+  // Worker thread only.
+  bool updateResident(const Point& centre);
+  void rebuildTargets(const Cloud::Ptr& fine);
 
   struct RefineResult {
     Transform transform;
@@ -163,13 +177,23 @@ class Localizer {
   Config config_;
   PriorMap map_;
 
-  // The resident map, its display copy, and a counter bumped whenever either is
-  // swapped. Guarded: tile load/evict will replace them from the worker while
-  // the publisher reads them.
+  // The display copy and a counter bumped whenever it changes. Guarded because
+  // the publisher reads it off its own thread.
   mutable std::mutex map_mutex_;
-  Cloud::Ptr map_cloud_;  // == map_.cloud, cached for the crop
   Cloud::Ptr viz_cloud_;
   uint64_t map_generation_ = 0;
+
+  // Resident tiles and the ICP targets built from them. Worker thread only.
+  // Both targets and both trees are rebuilt together and only when a tile is
+  // paged in or out, which is what makes the search trees worth keeping: they
+  // survive every correction cycle that stays inside the same tile.
+  int ring_ = 1;
+  std::unordered_map<TileKey, Cloud::Ptr, TileKeyHash> resident_;
+  std::optional<TileKey> resident_centre_;
+  Cloud::Ptr target_fine_;
+  Cloud::Ptr target_coarse_;
+  pcl::search::KdTree<PointT>::Ptr tree_fine_;
+  pcl::search::KdTree<PointT>::Ptr tree_coarse_;
 
   std::atomic<bool> stop_{false};
   std::mutex stop_mutex_;

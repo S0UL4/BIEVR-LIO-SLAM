@@ -83,18 +83,36 @@ bool Localizer::start(std::string* message) {
   LoadOptions options;
   options.scan_context = config_.scan_context;
   options.voxel_size_m = config_.map_voxel_size_m;
+  options.tile_size_m = config_.tile_size_m;
+  options.overview_voxel_size_m = config_.map_viz_voxel_size_m;
   if (!loadPriorMap(config_.map_path, options, map_, message)) {
     std::lock_guard<std::mutex> lock(state_mutex_);
     status_ = Status::NoMap;
     return false;
   }
+  ring_ = std::max(1, static_cast<int>(std::ceil(config_.crop_radius_m /
+                                                 std::max(config_.tile_size_m, 1.0))));
+
+  Cloud::Ptr viz;
+  if (map_.tiled()) {
+    // Nothing but the overview is resident yet, and that is correct: tiles are
+    // paged in around the first fix, and until there is one there is no centre
+    // to page around. Scan Context relocalization never touches the cloud.
+    viz.reset(new Cloud(*map_.tiles->overview()));
+    LOG(I, "Prior map tiled: " << map_.tiles->tiles().size() << " tiles, "
+                               << map_.tiles->numPoints() << " points, resident ring " << ring_
+                               << " (" << (2 * ring_ + 1) << "x" << (2 * ring_ + 1) << "), "
+                               << viz->size() << " points for display.");
+  } else {
+    viz = voxelDownsample(*map_.cloud, config_.map_viz_voxel_size_m);
+    rebuildTargets(map_.cloud);
+    LOG(I, "Prior map resident whole: " << map_.cloud->size() << " points for ICP, "
+                                        << viz->size() << " for display.");
+  }
   {
     std::lock_guard<std::mutex> lock(map_mutex_);
-    map_cloud_ = map_.cloud;
-    viz_cloud_ = voxelDownsample(*map_cloud_, config_.map_viz_voxel_size_m);
+    viz_cloud_ = viz;
     ++map_generation_;
-    LOG(I, "Prior map resident: " << map_cloud_->size() << " points for ICP, "
-                                  << viz_cloud_->size() << " for display.");
   }
 
   {
@@ -192,31 +210,78 @@ std::optional<Transform> Localizer::relocalize(const PendingFrame& frame) {
   return map_.reloc->poses[match.index];
 }
 
-Localizer::Cloud::Ptr Localizer::cropAround(const Point& centre, double scale) const {
-  Cloud::Ptr cropped(new Cloud());
-  // Snapshot the pointer, scan outside the lock: the scan is long and must not
-  // hold up a resident-set swap.
-  Cloud::ConstPtr map;
-  {
-    std::lock_guard<std::mutex> lock(map_mutex_);
-    map = map_cloud_;
-  }
-  if (!map) return cropped;
+void Localizer::rebuildTargets(const Cloud::Ptr& fine) {
+  target_fine_ = fine;
+  // Tiles are already stored at map_voxel_size_m, so the fine target needs no
+  // further filtering; only the coarse pass gets its own copy.
+  const double base_leaf = std::max(config_.map_voxel_size_m, 0.1);
+  target_coarse_ = voxelDownsample(*fine, base_leaf * config_.coarse_scale);
 
-  const float cx = static_cast<float>(centre.x());
-  const float cy = static_cast<float>(centre.y());
-  const float cz = static_cast<float>(centre.z());
-  const float radius = static_cast<float>(config_.crop_radius_m * scale);
-  const float radius_sq = radius * radius;
+  // The trees are the point of all this: built once per resident set, then
+  // handed to every ICP call that follows with force_no_recompute.
+  tree_fine_.reset(new pcl::search::KdTree<PointT>());
+  tree_fine_->setInputCloud(target_fine_);
+  tree_coarse_.reset(new pcl::search::KdTree<PointT>());
+  tree_coarse_->setInputCloud(target_coarse_);
+}
 
-  cropped->reserve(map->size() / 4);
-  for (const auto& p : map->points) {
-    const float dx = p.x - cx;
-    const float dy = p.y - cy;
-    const float dz = p.z - cz;
-    if (dx * dx + dy * dy + dz * dz <= radius_sq) cropped->push_back(p);
+bool Localizer::updateResident(const Point& centre) {
+  if (!map_.tiled()) return target_fine_ && !target_fine_->empty();
+
+  const TileKey key = map_.tiles->keyAt(centre.x(), centre.y());
+  if (resident_centre_ && *resident_centre_ == key) {
+    return target_fine_ && !target_fine_->empty();
   }
-  return cropped;
+  resident_centre_ = key;
+
+  const std::vector<TileKey> ring = map_.tiles->ringAround(key, ring_);
+  bool changed = false;
+  for (const TileKey& tile : ring) {
+    if (resident_.count(tile)) continue;
+    if (Cloud::Ptr cloud = map_.tiles->load(tile)) {
+      resident_.emplace(tile, cloud);
+      changed = true;
+    }
+  }
+
+  // Evict one ring further out than we load, so a pose sitting on a tile
+  // boundary does not page the same tiles in and out every cycle.
+  for (auto it = resident_.begin(); it != resident_.end();) {
+    const int64_t distance = std::max(std::abs(it->first.x - key.x), std::abs(it->first.y - key.y));
+    if (distance > ring_ + 1) {
+      it = resident_.erase(it);
+      changed = true;
+    } else {
+      ++it;
+    }
+  }
+
+  // Crossing into a tile whose whole ring is already resident costs nothing:
+  // the targets and their trees stay exactly as they were.
+  if (!changed && target_fine_) return !target_fine_->empty();
+
+  size_t total = 0;
+  for (const TileKey& tile : ring) {
+    const auto it = resident_.find(tile);
+    if (it != resident_.end()) total += it->second->size();
+  }
+  Cloud::Ptr fine(new Cloud());
+  fine->reserve(total);
+  for (const TileKey& tile : ring) {
+    const auto it = resident_.find(tile);
+    if (it != resident_.end()) *fine += *it->second;
+  }
+  if (fine->empty()) {
+    LOG(W, "No prior map around (" << centre.x() << ", " << centre.y() << ").");
+    target_fine_ = fine;
+    return false;
+  }
+
+  rebuildTargets(fine);
+  LOG(I, "Prior map tiles at (" << key.x << ", " << key.y << "): " << ring.size()
+                                << " in the ring, " << resident_.size() << " held, "
+                                << fine->size() << " points in the ICP target.");
+  return true;
 }
 
 Localizer::RefineResult Localizer::refine(const Cloud& source_odom, const Transform& guess,
@@ -228,27 +293,29 @@ Localizer::RefineResult Localizer::refine(const Cloud& source_odom, const Transf
   icp.setEuclideanFitnessEpsilon(config_.icp_euclidean_fitness_epsilon);
   icp.setRANSACIterations(0);
 
-  // Crop once: only the leaf sizes and the correspondence distance change
-  // between passes, not which part of the map is in play.
-  const Cloud::Ptr target = cropAround(centre, 1.0);
-  if (target->empty()) {
-    LOG(W, "Prior map has no points within " << config_.crop_radius_m << " m of the estimate.");
-    return result;
-  }
+  // Page in whatever tiles the estimate sits on. Both ICP passes then run
+  // against the cached targets and their prebuilt trees.
+  if (!updateResident(centre)) return result;
+
   const Cloud::Ptr source(new Cloud(source_odom));
-  const double base_leaf = std::max(config_.map_voxel_size_m, 0.1);
   Eigen::Matrix4f transformation = toMatrix4f(guess);
 
   // Coarse then fine: the coarse pass tolerates a seed several metres out, the
   // fine pass tightens it. Same two-stage shape as FAST_LIO_LOCALIZATION.
-  for (const double scale : {config_.coarse_scale, 1.0}) {
-    const Cloud::Ptr target_scaled = voxelize(target, base_leaf * scale);
+  const std::pair<double, bool> passes[] = {{config_.coarse_scale, true}, {1.0, false}};
+  for (const auto& [scale, coarse] : passes) {
+    const Cloud::Ptr target = coarse ? target_coarse_ : target_fine_;
+    const auto& tree = coarse ? tree_coarse_ : tree_fine_;
     const Cloud::Ptr source_scaled = voxelize(source, config_.scan_voxel_size_m * scale);
-    if (source_scaled->empty() || target_scaled->empty()) return result;
+    if (source_scaled->empty() || !target || target->empty()) return result;
 
     icp.setMaxCorrespondenceDistance(config_.icp_max_correspondence_distance * scale);
     icp.setInputSource(source_scaled);
-    icp.setInputTarget(target_scaled);
+    icp.setInputTarget(target);
+    // Order does not matter, but this must come after every setInputTarget:
+    // force_no_recompute is what stops initCompute rebuilding the tree we just
+    // spent a resident-set change building.
+    icp.setSearchMethodTarget(tree, /*force_no_recompute=*/true);
 
     Cloud aligned;
     icp.align(aligned, transformation);

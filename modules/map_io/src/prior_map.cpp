@@ -40,28 +40,14 @@ bool loadCloud(const std::string& path, double voxel_size, MapCloud::Ptr& out) {
   return true;
 }
 
-// Exact key comparison, so the hash only has to spread -- collisions are
-// resolved by operator== and never merge two voxels.
-struct VoxelKey {
-  int64_t x = 0, y = 0, z = 0;
-  bool operator==(const VoxelKey& other) const {
-    return x == other.x && y == other.y && z == other.z;
-  }
-};
-
-struct VoxelKeyHash {
-  size_t operator()(const VoxelKey& k) const {
-    return static_cast<size_t>((k.x * 73856093) ^ (k.y * 19349663) ^ (k.z * 83492791));
-  }
-};
-
-struct VoxelAccum {
-  Eigen::Vector3f sum = Eigen::Vector3f::Zero();
-  uint32_t count = 0;
-};
-
 // A foreign PCD carries no conventions: wrong units or a non z-up axis show up
 // here as an obviously wrong extent, long before ICP starts failing to converge.
+void logExtent(size_t num_points, const Eigen::Vector3f& lo, const Eigen::Vector3f& hi) {
+  const Eigen::Vector3f extent = hi - lo;
+  LOG(I, "Prior map: " << num_points << " points, extent " << extent.x() << " x " << extent.y()
+                       << " x " << extent.z() << " m.");
+}
+
 void logExtent(const MapCloud& cloud) {
   Eigen::Vector3f lo = cloud.points.front().getVector3fMap();
   Eigen::Vector3f hi = lo;
@@ -69,9 +55,33 @@ void logExtent(const MapCloud& cloud) {
     lo = lo.cwiseMin(p.getVector3fMap());
     hi = hi.cwiseMax(p.getVector3fMap());
   }
-  const Eigen::Vector3f extent = hi - lo;
-  LOG(I, "Prior map: " << cloud.size() << " points, extent " << extent.x() << " x " << extent.y()
-                       << " x " << extent.z() << " m.");
+  logExtent(cloud.size(), lo, hi);
+}
+
+// Tiles when a cache can be built, and falls back to holding the cloud when one
+// cannot -- an unwritable directory, a format the tiler cannot walk. Either way
+// the caller gets a usable map, which is the point: a foreign PCD must work.
+bool loadCloudOrTiles(const std::string& cloud_path, const LoadOptions& options, PriorMap& map) {
+  if (options.tile_size_m > 0.0) {
+    auto tiles = std::make_shared<TileMap>();
+    TileMap::Config config;
+    config.tile_size_m = options.tile_size_m;
+    config.voxel_size_m = options.voxel_size_m;
+    config.overview_voxel_size_m = options.overview_voxel_size_m;
+
+    std::string reason;
+    if (tiles->open(cloud_path, config, &reason)) {
+      map.tiles = std::move(tiles);
+      logExtent(map.tiles->numPoints(), map.tiles->min(), map.tiles->max());
+      return true;
+    }
+    LOG(W, "No tile cache for " << cloud_path << " (" << reason
+                                << "); holding the whole cloud instead.");
+  }
+
+  if (!loadCloud(cloud_path, options.voxel_size_m, map.cloud)) return false;
+  logExtent(*map.cloud);
+  return true;
 }
 
 // TUM: `t tx ty tz qx qy qz qw`, one pose per line, seconds.
@@ -159,42 +169,6 @@ bool loadRelocalization(const std::filesystem::path& root, const LoadOptions& op
 
 }  // namespace
 
-MapCloud::Ptr voxelDownsample(const MapCloud& cloud, double leaf_m) {
-  MapCloud::Ptr out(new MapCloud());
-  if (leaf_m <= 0.0 || cloud.empty()) {
-    *out = cloud;
-    return out;
-  }
-
-  const double inv_leaf = 1.0 / leaf_m;
-  std::unordered_map<VoxelKey, VoxelAccum, VoxelKeyHash> voxels;
-  voxels.reserve(cloud.size() / 8);  // this map is mostly repeat passes
-
-  for (const auto& p : cloud.points) {
-    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
-    // std::floor, never a cast: truncation toward zero makes the origin voxel
-    // double width.
-    VoxelKey key;
-    key.x = static_cast<int64_t>(std::floor(p.x * inv_leaf));
-    key.y = static_cast<int64_t>(std::floor(p.y * inv_leaf));
-    key.z = static_cast<int64_t>(std::floor(p.z * inv_leaf));
-
-    VoxelAccum& accum = voxels[key];
-    accum.sum += p.getVector3fMap();
-    ++accum.count;
-  }
-
-  out->reserve(voxels.size());
-  for (const auto& entry : voxels) {
-    const Eigen::Vector3f centroid = entry.second.sum / static_cast<float>(entry.second.count);
-    out->push_back(pcl::PointXYZ(centroid.x(), centroid.y(), centroid.z()));
-  }
-  out->width = out->size();
-  out->height = 1;
-  out->is_dense = true;
-  return out;
-}
-
 bool loadPriorMap(const std::string& path, const LoadOptions& options, PriorMap& map,
                   std::string* message) {
   const auto fail = [message](const std::string& text) {
@@ -207,20 +181,18 @@ bool loadPriorMap(const std::string& path, const LoadOptions& options, PriorMap&
 
   if (!std::filesystem::is_directory(path, ec)) {
     // Bare PCD: a cloud and nothing else, so localization needs an initial pose.
-    if (!loadCloud(path, options.voxel_size_m, map.cloud)) {
+    if (!loadCloudOrTiles(path, options, map)) {
       return fail("Failed to read point cloud " + path);
     }
-    logExtent(*map.cloud);
-    map.meta.num_points = map.cloud->size();
+    map.meta.num_points = map.tiled() ? map.tiles->numPoints() : map.cloud->size();
     if (message) *message = "Loaded cloud-only prior map from " + path;
     return true;
   }
 
   const std::filesystem::path root(path);
-  if (!loadCloud((root / kCloudFile).string(), options.voxel_size_m, map.cloud)) {
+  if (!loadCloudOrTiles((root / kCloudFile).string(), options, map)) {
     return fail("Failed to read " + (root / kCloudFile).string());
   }
-  logExtent(*map.cloud);
 
   if (std::filesystem::exists(root / kMetaFile)) {
     try {
