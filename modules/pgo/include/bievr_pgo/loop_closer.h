@@ -2,9 +2,7 @@
 #define BIEVR_PGO_LOOP_CLOSER_H_
 
 // Scan Context loop closure + GTSAM pose graph, running downstream of the
-// odometry. Ported from sc_pgo/src/laserPosegraphOptimization.cpp; the algorithm
-// is kept identical so its measured accuracy carries over.
-//
+// odometry. 
 // Feed it with Pipeline::setFrameObserver. addFrame() only decides whether the
 // frame is a keyframe and hands a copy to a worker, so the odometry thread never
 // waits on ICP or iSAM2.
@@ -57,8 +55,8 @@ class LoopCloser {
     double icp_euclidean_fitness_epsilon = 1e-6;
     int icp_ransac_iterations = 0;
     double loop_fitness_score_threshold = 0.3;  // reject loops scoring above this
-    // Seed ICP with Scan Context's yaw instead of identity. Measured worse on the
-    // reference session; only useful where revisits run in the opposite direction.
+    // Seed ICP with Scan Context's yaw instead of identity.
+    // only useful where revisits run in the opposite direction.
     bool use_sc_yaw_guess = false;
     double sc_yaw_guess_min_deg = 45.0;
 
