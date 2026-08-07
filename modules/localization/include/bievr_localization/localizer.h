@@ -68,9 +68,7 @@ class Localizer {
     int icp_max_iterations = 20;
     double icp_transformation_epsilon = 1e-6;
     double icp_euclidean_fitness_epsilon = 1e-6;
-    // PCL's getFitnessScore() is the MEAN SQUARED correspondence distance in m^2
-    // -- not Open3D's inlier fraction, so the reference's 0.95 does not carry
-    // over. Reject above this. Needs tuning per environment.
+    // Needs tuning per environment.
     double fitness_threshold = 1.0;
 
     // Scan Context query settings. Geometry always comes from the bundle.
