@@ -40,6 +40,10 @@ class Localizer {
     std::string map_frame = "map";
 
     double map_voxel_size_m = 0.0;    // leaf applied to the prior map on load, <=0 keeps it
+    // Coarser leaf for the published copy. Display needs nowhere near the
+    // density ICP does, and this is the difference between a message RViz can
+    // draw and one it chokes on.
+    double map_viz_voxel_size_m = 0.4;
     double scan_voxel_size_m = 0.5;   // leaf applied to the ICP source scan
     double crop_radius_m = 150.0;     // prior-map crop around the predicted pose
     double correction_frequency = 0.5;  // Hz
@@ -117,8 +121,12 @@ class Localizer {
   // True when the loaded map carries a descriptor database.
   bool canRelocalize() const;
 
-  // The prior map in the map frame, for visualization. Empty until start().
-  Pointcloud mapCloud() const;
+  // The prior map in the map frame at display resolution, and a counter that
+  // changes whenever the resident map does. Publishers republish on a change
+  // rather than on a timer -- the map is far too heavy to send periodically.
+  // Null until start().
+  Cloud::ConstPtr vizCloud() const;
+  uint64_t mapGeneration() const;
 
  private:
   struct PendingFrame {
@@ -154,7 +162,14 @@ class Localizer {
 
   Config config_;
   PriorMap map_;
+
+  // The resident map, its display copy, and a counter bumped whenever either is
+  // swapped. Guarded: tile load/evict will replace them from the worker while
+  // the publisher reads them.
+  mutable std::mutex map_mutex_;
   Cloud::Ptr map_cloud_;  // == map_.cloud, cached for the crop
+  Cloud::Ptr viz_cloud_;
+  uint64_t map_generation_ = 0;
 
   std::atomic<bool> stop_{false};
   std::mutex stop_mutex_;

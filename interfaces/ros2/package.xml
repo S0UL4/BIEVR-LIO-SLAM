@@ -15,6 +15,9 @@
   <depend>bievr_ros_common</depend>
   <depend>bievr_pgo</depend>
   <depend>bievr_localization</depend>
+  <!-- Only used when bievr_localization is present, but colcon needs it on the
+       prefix path either way to find it at configure time. -->
+  <depend>pcl_conversions</depend>
   <depend>yaml_cpp_vendor</depend>
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>

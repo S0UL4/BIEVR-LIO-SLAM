@@ -66,6 +66,13 @@ struct LoadOptions {
   double voxel_size_m = 0.0;
 };
 
+// Voxel downsample, one centroid per occupied voxel. Used instead of
+// pcl::VoxelGrid because that one indexes its grid with an int32 and, when
+// extent/leaf overflows it, silently returns the cloud *unfiltered* -- which a
+// 1 km map at a 0.3 m leaf does. Keys here are per-axis int64, so only the
+// occupied voxels cost anything and the extent is irrelevant.
+MapCloud::Ptr voxelDownsample(const MapCloud& cloud, double leaf_m);
+
 // `path` is either a .pcd file (cloud only) or a bundle directory. A directory
 // whose scan_context.bin / poses_tum.txt are missing or inconsistent still
 // loads, cloud only, with the reason reported through `message`. Fails only when

@@ -63,6 +63,14 @@ else()
   message(STATUS "bievr_lio_ros2: livox_ros_driver2 NOT found, building without Livox support.")
 endif()
 
+if(bievr_localization_FOUND)
+  # The prior map is published straight from its PCL cloud, so pcl_conversions
+  # rides along with localization rather than being a hard dependency of the
+  # odometry-only build.
+  find_package(pcl_conversions REQUIRED)
+  list(APPEND ament_dependencies pcl_conversions)
+endif()
+
 # ---- Executables ----
 # The wrapper is now header-only apart from the two executables (conversions,
 # publisher and config loading all live in headers shared via bievr_ros_common),

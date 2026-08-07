@@ -1,16 +1,18 @@
 #include "bievr_map_io/prior_map.h"
 
-#include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
 
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <system_error>
+#include <unordered_map>
 
 #include "bievr_lio/log++.h"
 #include "bievr_lio/utils.h"
@@ -31,14 +33,32 @@ bool loadCloud(const std::string& path, double voxel_size, MapCloud::Ptr& out) {
     out = raw;
     return true;
   }
-  MapCloud::Ptr filtered(new MapCloud());
-  pcl::VoxelGrid<pcl::PointXYZ> filter;
-  filter.setLeafSize(voxel_size, voxel_size, voxel_size);
-  filter.setInputCloud(raw);
-  filter.filter(*filtered);
-  out = filtered;
+  const size_t before = raw->size();
+  out = voxelDownsample(*raw, voxel_size);
+  LOG(I, "Prior map filtered at " << voxel_size << " m: " << before << " -> " << out->size()
+                                  << " points.");
   return true;
 }
+
+// Exact key comparison, so the hash only has to spread -- collisions are
+// resolved by operator== and never merge two voxels.
+struct VoxelKey {
+  int64_t x = 0, y = 0, z = 0;
+  bool operator==(const VoxelKey& other) const {
+    return x == other.x && y == other.y && z == other.z;
+  }
+};
+
+struct VoxelKeyHash {
+  size_t operator()(const VoxelKey& k) const {
+    return static_cast<size_t>((k.x * 73856093) ^ (k.y * 19349663) ^ (k.z * 83492791));
+  }
+};
+
+struct VoxelAccum {
+  Eigen::Vector3f sum = Eigen::Vector3f::Zero();
+  uint32_t count = 0;
+};
 
 // A foreign PCD carries no conventions: wrong units or a non z-up axis show up
 // here as an obviously wrong extent, long before ICP starts failing to converge.
@@ -138,6 +158,42 @@ bool loadRelocalization(const std::filesystem::path& root, const LoadOptions& op
 }
 
 }  // namespace
+
+MapCloud::Ptr voxelDownsample(const MapCloud& cloud, double leaf_m) {
+  MapCloud::Ptr out(new MapCloud());
+  if (leaf_m <= 0.0 || cloud.empty()) {
+    *out = cloud;
+    return out;
+  }
+
+  const double inv_leaf = 1.0 / leaf_m;
+  std::unordered_map<VoxelKey, VoxelAccum, VoxelKeyHash> voxels;
+  voxels.reserve(cloud.size() / 8);  // this map is mostly repeat passes
+
+  for (const auto& p : cloud.points) {
+    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
+    // std::floor, never a cast: truncation toward zero makes the origin voxel
+    // double width.
+    VoxelKey key;
+    key.x = static_cast<int64_t>(std::floor(p.x * inv_leaf));
+    key.y = static_cast<int64_t>(std::floor(p.y * inv_leaf));
+    key.z = static_cast<int64_t>(std::floor(p.z * inv_leaf));
+
+    VoxelAccum& accum = voxels[key];
+    accum.sum += p.getVector3fMap();
+    ++accum.count;
+  }
+
+  out->reserve(voxels.size());
+  for (const auto& entry : voxels) {
+    const Eigen::Vector3f centroid = entry.second.sum / static_cast<float>(entry.second.count);
+    out->push_back(pcl::PointXYZ(centroid.x(), centroid.y(), centroid.z()));
+  }
+  out->width = out->size();
+  out->height = 1;
+  out->is_dense = true;
+  return out;
+}
 
 bool loadPriorMap(const std::string& path, const LoadOptions& options, PriorMap& map,
                   std::string* message) {

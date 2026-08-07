@@ -5,7 +5,8 @@
 //
 //   TF <map> -> <odom>          the correction, broadcast only once localized
 //   <prefix>/loc/odom           nav_msgs/Odometry, the pose in the map frame
-//   <prefix>/loc/map            sensor_msgs/PointCloud2, the prior map
+//   <prefix>/loc/map            sensor_msgs/PointCloud2, the prior map (latched,
+//                               sent only when the resident map changes)
 //   <prefix>/loc/status         std_msgs/String, NO_MAP/WAITING_FOR_POSE/...
 //   /initialpose                subscribed, seeds or re-seeds localization
 //
@@ -21,9 +22,12 @@
 #include <bievr_localization/localizer.h>
 
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <nav_msgs/msg/odometry.hpp>
+#include <pcl_conversions/pcl_conversions.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -57,8 +61,8 @@ class Localization {
   bool start(std::string* message = nullptr) {
     if (!localizer_->start(message)) return false;
 
-    // Republishing the whole prior map is heavy, so it goes off the default
-    // group; the pose broadcast is cheap and stays serialized with the sensors.
+    // Serializing the prior map is heavy, so it goes off the default group; the
+    // pose broadcast is cheap and stays serialized with the sensors.
     map_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     initial_pose_sub_ = node_->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
         "/initialpose", rclcpp::QoS(1),
@@ -68,8 +72,10 @@ class Localization {
 
     pose_timer_ = node_->create_wall_timer(periodFrom(config_.publish_frequency),
                                            [this] { publishPose(); });
-    map_timer_ = node_->create_wall_timer(periodFrom(config_.map_publish_frequency),
-                                          [this] { publishMap(); }, map_group_);
+    // Not a publish rate: this only compares a counter, and sends the map on the
+    // ticks where the resident set actually changed.
+    map_timer_ = node_->create_wall_timer(std::chrono::seconds(1), [this] { publishMap(); },
+                                          map_group_);
 
     // Registering last: nothing reaches the Localizer until it is fully built.
     pipeline_->addFrameObserver(
@@ -144,16 +150,24 @@ class Localization {
     odom_pub_->publish(odom);
   }
 
+  // Sends the prior map only when it changed. Deliberately not gated on a
+  // subscriber count: the topic is transient_local, so publishing once into the
+  // durability cache is what serves an RViz that connects later. Only ever
+  // called on map_group_, so published_generation_ needs no lock.
   void publishMap() {
-    if (map_pub_->get_subscription_count() == 0) return;
-    const Pointcloud map = localizer_->mapCloud();
-    if (map.empty()) return;
+    const uint64_t generation = localizer_->mapGeneration();
+    if (generation == published_generation_) return;
+
+    const Localizer::Cloud::ConstPtr map = localizer_->vizCloud();
+    if (!map || map->empty()) return;
 
     sensor_msgs::msg::PointCloud2 msg;
-    pointCloudToMsg(map, msg);
+    pcl::toROSMsg(*map, msg);
     msg.header.frame_id = config_.localizer.map_frame;
     msg.header.stamp = node_->now();
     map_pub_->publish(msg);
+    published_generation_ = generation;
+    LOG(I, "Published the prior map: " << map->size() << " points.");
   }
 
   rclcpp::Node::SharedPtr node_;
@@ -164,6 +178,7 @@ class Localization {
   std::string odom_frame_;  // the odometry's parent frame, child of the correction
   std::string body_frame_;
   Localizer::Status last_status_ = Localizer::Status::NoMap;
+  uint64_t published_generation_ = 0;  // map_group_ only
 
   mutable std::mutex odom_mutex_;
   Transform latest_odom_;

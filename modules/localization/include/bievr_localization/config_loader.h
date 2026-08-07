@@ -18,7 +18,8 @@ struct LocalizationConfig {
   bool enable = false;
   Localizer::Config localizer;
   double publish_frequency = 50.0;  // Hz, the map->odom + fused pose broadcast
-  double map_publish_frequency = 0.1;  // Hz, the prior map is heavy
+  // The prior map has no publish rate: it goes out when the resident set
+  // changes and not otherwise. See Localization::publishMap.
 };
 
 inline bool loadLocalizationConfig(const std::vector<std::string>& yaml_paths,
@@ -43,6 +44,7 @@ inline bool loadLocalizationConfig(const std::vector<std::string>& yaml_paths,
   c.map_path = yaml.get<std::string>(s, "map_path", c.map_path);
   c.map_frame = yaml.get<std::string>(s, "map_frame", c.map_frame);
   c.map_voxel_size_m = yaml.get<double>(s, "map_voxel_size_m", c.map_voxel_size_m);
+  c.map_viz_voxel_size_m = yaml.get<double>(s, "map_viz_voxel_size_m", c.map_viz_voxel_size_m);
   c.scan_voxel_size_m = yaml.get<double>(s, "scan_voxel_size_m", c.scan_voxel_size_m);
   c.crop_radius_m = yaml.get<double>(s, "crop_radius_m", c.crop_radius_m);
   c.correction_frequency = yaml.get<double>(s, "correction_frequency", c.correction_frequency);
@@ -68,8 +70,6 @@ inline bool loadLocalizationConfig(const std::vector<std::string>& yaml_paths,
       yaml.get<int>(s, "max_consecutive_failures", c.max_consecutive_failures);
 
   config.publish_frequency = yaml.get<double>(s, "publish_frequency", config.publish_frequency);
-  config.map_publish_frequency =
-      yaml.get<double>(s, "map_publish_frequency", config.map_publish_frequency);
   return true;
 }
 

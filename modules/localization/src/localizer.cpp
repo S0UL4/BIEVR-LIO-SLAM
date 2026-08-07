@@ -88,7 +88,14 @@ bool Localizer::start(std::string* message) {
     status_ = Status::NoMap;
     return false;
   }
-  map_cloud_ = map_.cloud;
+  {
+    std::lock_guard<std::mutex> lock(map_mutex_);
+    map_cloud_ = map_.cloud;
+    viz_cloud_ = voxelDownsample(*map_cloud_, config_.map_viz_voxel_size_m);
+    ++map_generation_;
+    LOG(I, "Prior map resident: " << map_cloud_->size() << " points for ICP, "
+                                  << viz_cloud_->size() << " for display.");
+  }
 
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
@@ -136,15 +143,14 @@ Localizer::Stats Localizer::stats() const {
 
 bool Localizer::canRelocalize() const { return map_.canRelocalize(); }
 
-Pointcloud Localizer::mapCloud() const {
-  Pointcloud out;
-  if (!map_cloud_) return out;
-  out.data().resize(3, map_cloud_->size());
-  for (size_t i = 0; i < map_cloud_->size(); ++i) {
-    const auto& p = map_cloud_->points[i];
-    out.data().col(i) << p.x, p.y, p.z;
-  }
-  return out;
+Localizer::Cloud::ConstPtr Localizer::vizCloud() const {
+  std::lock_guard<std::mutex> lock(map_mutex_);
+  return viz_cloud_;
+}
+
+uint64_t Localizer::mapGeneration() const {
+  std::lock_guard<std::mutex> lock(map_mutex_);
+  return map_generation_;
 }
 
 std::optional<Localizer::PendingFrame> Localizer::takeFrame() {
@@ -188,7 +194,14 @@ std::optional<Transform> Localizer::relocalize(const PendingFrame& frame) {
 
 Localizer::Cloud::Ptr Localizer::cropAround(const Point& centre, double scale) const {
   Cloud::Ptr cropped(new Cloud());
-  if (!map_cloud_) return cropped;
+  // Snapshot the pointer, scan outside the lock: the scan is long and must not
+  // hold up a resident-set swap.
+  Cloud::ConstPtr map;
+  {
+    std::lock_guard<std::mutex> lock(map_mutex_);
+    map = map_cloud_;
+  }
+  if (!map) return cropped;
 
   const float cx = static_cast<float>(centre.x());
   const float cy = static_cast<float>(centre.y());
@@ -196,8 +209,8 @@ Localizer::Cloud::Ptr Localizer::cropAround(const Point& centre, double scale) c
   const float radius = static_cast<float>(config_.crop_radius_m * scale);
   const float radius_sq = radius * radius;
 
-  cropped->reserve(map_cloud_->size() / 4);
-  for (const auto& p : map_cloud_->points) {
+  cropped->reserve(map->size() / 4);
+  for (const auto& p : map->points) {
     const float dx = p.x - cx;
     const float dy = p.y - cy;
     const float dz = p.z - cz;
