@@ -39,21 +39,9 @@ after each frame is published. Corrections are published alongside the odometry 
 are **never fed back into it**, so the odometry behaves identically whether these
 modules run or not.
 
-```
-                    ┌──────────────────────────────────────────┐
-  LiDAR + IMU ─────▶│  BIEVR-LIO odometry   (odom ──▶ imu)     │
-                    └───────────────┬──────────────────────────┘
-                                    │ addFrameObserver(stamp, T_odom_body, cloud)
-                    ┌───────────────┴───────────────┐
-                    ▼                               ▼
-        ┌───────────────────────┐       ┌───────────────────────────┐
-        │ bievr_pgo             │       │ bievr_localization        │
-        │ Scan Context + GTSAM  │       │ ICP against a prior map   │
-        │ → /pgo/{path,odom,map}│       │ → TF  map ──▶ odom        │
-        │ → map bundle on disk  │       │ → /loc/{odom,path,status} │
-        └───────────────────────┘       └───────────────────────────┘
-             MAPPING MODE                    LOCALIZATION MODE
-```
+<p align="center">
+  <img width='100%' src="doc/architecture.png">
+</p>
 
 The consequence worth stating plainly: **this is portable to any LOAM-like LIO.**
 Nothing in `bievr_scancontext`, `bievr_pgo`, `bievr_map_io` or `bievr_localization`
@@ -160,6 +148,19 @@ consumes:
 | `poses_tum.txt` | the keyframe poses those descriptors are indexed by |
 | `meta.yaml` | frame, keyframe filter size, descriptor geometry |
 
+**Saving the pure-odometry (drifted) map.** `save_map_bundle` writes the loop-closed
+map from `bievr_pgo`. Independently of loop closure, `bievr_lio` itself accumulates
+the raw registered scans (`map_save.accumulate`, on by default) and can write that
+map — drift and all, no pose-graph correction applied — on its own:
+
+```bash
+ros2 service call /bievr_lio_mapping_node/save_map_drifted std_srvs/srv/Trigger
+```
+
+Written to `map_save.path` in `params.yaml` (default `bievr_map.pcd`), voxelized at
+`map_save.resolution_m`. Useful to inspect what the odometry alone produced, or on a
+run with `loop_closure.enable: false` where `save_map_bundle` isn't available.
+
 ## Localization mode
 
 ```bash
@@ -168,7 +169,7 @@ ros2 launch bievr_lio_ros2 localization.launch.py \
 ```
 
 `map:=` takes a bundle directory (relocalizes by itself) **or** a bare `.pcd` from
-any SLAM (waits for a 2D Pose Estimate in RViz). Watch `/bievr_lio/loc/status`,
+any SLAM (waits for a 2D Pose Estimate in RViz or Foxglove, or.. maybe plotjuggler(? not sure though)). Watch `/bievr_lio/loc/status`,
 which reports `NO_MAP`, `WAITING_FOR_POSE`, `LOCALIZED` or `LOST`.
 
 Until there is a fix, **no TF is broadcast at all** — an absent transform is more
@@ -181,15 +182,11 @@ honest than a fake identity that puts the robot at the map origin.
       in FAST_LIO_LOCALIZATION. Visible as a small jump at the correction rate.
       Interpolating the correction between cycles would make the fused pose
       continuous without touching the odometry.
-- [ ] **GPS altitude constraints in the pose graph, to kill Z drift.** Loop closure
-      fixes horizontal drift well but leaves vertical drift largely intact — there
-      is often nothing in the geometry to constrain it. Feeding GPS altitude in as
-      unary factors on `z` (loose noise, so horizontal accuracy is never borrowed
-      from it) is the cheap fix.
+- [ ] **GPS altitude constraints in the pose graph, to kill Z drift.**
 - [ ] Recovery from `LOST` on a cloud-only map, plus an `initial_pose` in YAML and a
       yaw sweep so a map without descriptors can seed itself.
 - [ ] A teach pass that lets a foreign `.pcd` earn a descriptor database from a
-      good localized run, instead of never having one.
+      good localized run, instead of never having one ( maybe a very nice feature to have ).
 
 # Setup
 
@@ -369,18 +366,15 @@ Livox-SDK2 installed system-wide). Only gen2 exists for ROS2 (enables
 - [livox_ros_driver2](https://github.com/Livox-SDK/livox_ros_driver2) +
   [Livox-SDK2](https://github.com/Livox-SDK/Livox-SDK2)
 
-**GTSAM** is needed for loop closure; there is no install script for it yet.
-Check out a [4.2 release](https://github.com/borglab/gtsam/releases) and build it
-into `/usr/local` (this repo is built and tested against 4.2.0).
-`GTSAM_USE_SYSTEM_EIGEN=ON` is not optional — GTSAM's bundled Eigen will not match
-the one the estimator uses:
-
-```bash
-git clone https://github.com/borglab/gtsam.git && cd gtsam && git checkout 4.2.0
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-      -DGTSAM_USE_SYSTEM_EIGEN=ON -DGTSAM_BUILD_TESTS=OFF -DGTSAM_BUILD_EXAMPLES_ALWAYS=OFF
-cmake --build build -j$(nproc) && sudo cmake --install build && sudo ldconfig
-```
+**GTSAM** is needed for loop closure. `modules/pgo/cmake/FindGTSAM.cmake` finds an
+existing install first; if none is found anywhere on `CMAKE_PREFIX_PATH`, it clones
+[4.2.0](https://github.com/borglab/gtsam/releases) and builds it automatically
+(`GTSAM_USE_SYSTEM_EIGEN=ON` — GTSAM's bundled Eigen would not match the one the
+estimator uses) into a per-user cache (`~/.cache/bievr-thirdparty/gtsam-4.2.0` by
+default, no `sudo` needed) the first time `bievr_pgo` is configured. Expect that
+first configure step to take several minutes; later builds reuse the cached install.
+Override the install location with `-DBIEVR_GTSAM_VENDOR_PREFIX=/usr/local` (e.g. to
+share one system-wide install across a Docker image, matching how Ceres is baked in).
 
 Build and source it (from the workspace root, so colcon picks up `BIEVR/` — the
 core — plus `modules/` and `interfaces/ros2`). `--packages-up-to` pulls the SLAM
@@ -568,15 +562,9 @@ and owes them its core ideas:
   the correction back. The trick of aligning the odom-frame scan against the
   map-frame prior so ICP's output *is* `T_map_odom` comes from there.
 
-The tiled prior map follows the tile-and-load-a-ring scheme from Xiang Gao's SLAM
-book (ch. 9–10) and its evolved form in `lightning-lm`.
-
-For the odometry itself, we thank the authors of [DLIO](https://github.com/vectr-ucla/direct_lidar_inertial_odometry), [Wavemap](https://github.com/ethz-asl/wavemap) and [UGPM](https://github.com/UTS-RI/ugpm) for open-sourcing their works that served as an inspiration for us.
-We used [ascii-image-converter](https://github.com/TheZoraiz/ascii-image-converter) for our ascii art.
-
 # Citation
 
-Please cite our work if you are using BIEVR-LIO in your research.
+Thanks to the BIEVR-LIO authors for their amazing and robust work.
   ```bibtex
 @article{pfreundschuh2026bievr,
   title        = {BIEVR-LIO: Robust LiDAR-Inertial Odometry through Bump-Image-Enhanced Voxel Maps},
