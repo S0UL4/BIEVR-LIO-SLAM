@@ -11,6 +11,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # GTSAM and PCL live here and nowhere else: bievr_lio keeps its Eigen/Ceres/TBB
 # dependency set, and the localization side links bievr_scancontext without this.
 find_package(Eigen3 REQUIRED)
+# cmake/FindGTSAM.cmake vendors and builds GTSAM from source if it isn't
+# already installed on the system -- see that file for the resolution order.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(GTSAM REQUIRED)
 # VTK 9.1 as packaged on Ubuntu declares a link interface on MPI::MPI_C without
 # find_package(MPI), so pulling PCL fails outright when MPI is absent. Nothing we
@@ -88,5 +91,11 @@ write_basic_package_version_file(
 install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake
   ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
+)
+
+# Installed alongside the package config so consumers' find_dependency(GTSAM)
+# (see bievr_pgoConfig.cmake.in) resolves GTSAM the same vendor-or-build way.
+install(FILES cmake/FindGTSAM.cmake
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 )

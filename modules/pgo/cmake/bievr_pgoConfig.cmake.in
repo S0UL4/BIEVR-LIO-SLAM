@@ -6,6 +6,9 @@ if(NOT TARGET Eigen3::Eigen)
   find_dependency(Eigen3)
 endif()
 if(NOT TARGET gtsam)
+  # FindGTSAM.cmake is installed next to this file (see bievr_pgo's
+  # CMakeLists.txt); it vendors/builds GTSAM if it's not found anywhere else.
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
   find_dependency(GTSAM)
 endif()
 # Same VTK/MPI workaround as the build: find_dependency(PCL) runs in the
