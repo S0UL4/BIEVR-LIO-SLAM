@@ -300,27 +300,40 @@ inline bool loadConfigFromYaml(const std::vector<std::string>& yaml_paths, Confi
   // --- dashboard (live status print) ---
   hc.print_dashboard = yaml.get<bool>("debug", "dashboard", false);
   hc.dashboard_ascii_path = yaml.get<std::string>("debug", "dashboard_ascii_path", "");
-  // If the dashboard is enabled but no explicit art path is given, look for
-  // `bievr_ascii.txt` next to the config files that were loaded. Those files may
-  // live in different directories (e.g. params.yaml in config/, the sensor
-  // config in config/sensor_configs/), so probe each config's directory and its
-  // parent and take the first that actually contains the file rather than
-  // guessing a path that may not exist.
-  if (hc.print_dashboard && hc.dashboard_ascii_path.empty()) {
+  // Resolve the art file. An absolute path is taken verbatim; a bare name (or no
+  // name at all, which means `bievr_ascii.txt`) is looked for in the working
+  // directory and then next to the config files that were loaded. Those may live
+  // in different directories -- params.yaml in config/, the sensor config in
+  // config/sensor_configs/ -- so probe each config's directory and its parent and
+  // take the first that actually contains the file rather than guessing a path
+  // that may not exist.
+  if (hc.print_dashboard) {
     namespace fs = std::filesystem;
-    for (const std::string& p : yaml_paths) {
-      if (p.empty()) continue;
-      const fs::path dir = fs::path(p).parent_path();
-      for (const fs::path& candidate_dir : {dir, dir.parent_path()}) {
-        const fs::path candidate = candidate_dir / "bievr_ascii.txt";
-        std::error_code ec;
-        if (fs::exists(candidate, ec)) {
-          hc.dashboard_ascii_path = candidate.string();
-          break;
+    const bool named = !hc.dashboard_ascii_path.empty();
+    const fs::path requested =
+        named ? fs::path(hc.dashboard_ascii_path) : fs::path("bievr_ascii.txt");
+
+    hc.dashboard_ascii_path.clear();
+    std::error_code ec;
+    if (requested.is_absolute() || fs::exists(requested, ec)) {
+      hc.dashboard_ascii_path = requested.string();
+    } else {
+      for (const std::string& p : yaml_paths) {
+        if (p.empty()) continue;
+        const fs::path dir = fs::path(p).parent_path();
+        for (const fs::path& candidate_dir : {dir, dir.parent_path()}) {
+          const fs::path candidate = candidate_dir / requested;
+          if (fs::exists(candidate, ec)) {
+            hc.dashboard_ascii_path = candidate.string();
+            break;
+          }
         }
+        if (!hc.dashboard_ascii_path.empty()) break;
       }
-      if (!hc.dashboard_ascii_path.empty()) break;
     }
+    // Keep a name the user actually asked for even when it was not found, so the
+    // pipeline reports it instead of silently dropping the art.
+    if (hc.dashboard_ascii_path.empty() && named) hc.dashboard_ascii_path = requested.string();
   }
 
   // Lower the log level so DEBUG messages are shown when requested, otherwise
