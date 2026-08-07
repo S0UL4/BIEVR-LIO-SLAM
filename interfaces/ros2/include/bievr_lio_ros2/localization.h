@@ -5,6 +5,7 @@
 //
 //   TF <map> -> <odom>          the correction, broadcast only once localized
 //   <prefix>/loc/odom           nav_msgs/Odometry, the pose in the map frame
+//   <prefix>/loc/path           nav_msgs/Path, the localized trajectory
 //   <prefix>/loc/map            sensor_msgs/PointCloud2, the prior map (latched,
 //                               sent only when the resident map changes)
 //   <prefix>/loc/status         std_msgs/String, NO_MAP/WAITING_FOR_POSE/...
@@ -27,6 +28,7 @@
 #include <memory>
 #include <mutex>
 #include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/path.hpp>
 #include <pcl_conversions/pcl_conversions.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -50,6 +52,7 @@ class Localization {
 
     const auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
     odom_pub_ = node_->create_publisher<nav_msgs::msg::Odometry>(topic_prefix + "/loc/odom", qos);
+    path_pub_ = node_->create_publisher<nav_msgs::msg::Path>(topic_prefix + "/loc/path", qos);
     map_pub_ =
         node_->create_publisher<sensor_msgs::msg::PointCloud2>(topic_prefix + "/loc/map", qos);
     status_pub_ = node_->create_publisher<std_msgs::msg::String>(topic_prefix + "/loc/status", qos);
@@ -76,6 +79,14 @@ class Localization {
     // ticks where the resident set actually changed.
     map_timer_ = node_->create_wall_timer(std::chrono::seconds(1), [this] { publishMap(); },
                                           map_group_);
+
+    // Serializing a growing path is O(n), so it shares the heavy group rather
+    // than the sensor one -- and being mutually exclusive with the map publish
+    // keeps the two from peaking together.
+    if (config_.publish_path) {
+      path_timer_ = node_->create_wall_timer(periodFrom(config_.path_publish_frequency),
+                                             [this] { publishPath(); }, map_group_);
+    }
 
     // Registering last: nothing reaches the Localizer until it is fully built.
     pipeline_->addFrameObserver(
@@ -142,12 +153,49 @@ class Localization {
     transformToMsg(correction.T_map_odom, tf_msg.transform);
     tf_->sendTransform(tf_msg);
 
+    const Transform T_map_body(Eigen::Isometry3d(correction.T_map_odom * T_odom_body));
     nav_msgs::msg::Odometry odom;
     odom.header = tf_msg.header;
     odom.child_frame_id = body_frame_;
-    transformToMsg(Transform(Eigen::Isometry3d(correction.T_map_odom * T_odom_body)),
-                   odom.pose.pose);
+    transformToMsg(T_map_body, odom.pose.pose);
     odom_pub_->publish(odom);
+
+    recordPath(stamp, T_map_body);
+  }
+
+  // One path pose per odometry frame, not per tick: this timer runs faster than
+  // the odometry delivers frames, and the extra ticks would only repeat the last
+  // pose. Called on the default group, so it must stay cheap.
+  void recordPath(uint64_t stamp, const Transform& T_map_body) {
+    if (!config_.publish_path || stamp == last_path_stamp_) return;
+    last_path_stamp_ = stamp;
+
+    std::lock_guard<std::mutex> lock(path_mutex_);
+    path_.poses.push_back(StampedPose{stamp, T_map_body});
+    if (config_.path_max_poses > 0 && path_.poses.size() > config_.path_max_poses) {
+      const size_t excess = path_.poses.size() - config_.path_max_poses;
+      path_.poses.erase(path_.poses.begin(), path_.poses.begin() + excess);
+    }
+  }
+
+  void publishPath() {
+    // Copy under the lock and serialize outside it: the odometry appends to this
+    // from the sensor thread and must not wait on a message being built.
+    Path snapshot;
+    {
+      std::lock_guard<std::mutex> lock(path_mutex_);
+      if (path_.poses.empty()) return;
+      snapshot = path_;
+    }
+
+    Header header;
+    header.seq = 0;
+    header.stamp = snapshot.poses.back().stamp;
+    header.frame = config_.localizer.map_frame;
+
+    nav_msgs::msg::Path msg;
+    pathToMsg(snapshot, header, msg);
+    path_pub_->publish(msg);
   }
 
   // Sends the prior map only when it changed. Deliberately not gated on a
@@ -185,7 +233,12 @@ class Localization {
   uint64_t latest_stamp_ = 0;
   bool have_odom_ = false;
 
+  mutable std::mutex path_mutex_;
+  Path path_;
+  uint64_t last_path_stamp_ = 0;  // publishPose only
+
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
@@ -194,6 +247,7 @@ class Localization {
   rclcpp::CallbackGroup::SharedPtr map_group_;
   rclcpp::TimerBase::SharedPtr pose_timer_;
   rclcpp::TimerBase::SharedPtr map_timer_;
+  rclcpp::TimerBase::SharedPtr path_timer_;
 };
 
 }  // namespace bievr

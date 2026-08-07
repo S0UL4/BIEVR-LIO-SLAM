@@ -96,8 +96,14 @@ localization: # Track a prior map, downstream of the odometry (bievr_localizatio
   map_frame: "map" # Parent of the odometry frame. Kept distinct from map.frame above.
 
   map_voxel_size_m: 0.3 # Leaf applied to the prior map on load; 0 keeps it as stored
+  map_viz_voxel_size_m: 0.0 # Coarser leaf for the published copy; 0 publishes it as loaded
   scan_voxel_size_m: 0.5 # Leaf applied to the scan before ICP
-  crop_radius_m: 150.0 # Prior-map crop around the predicted pose
+  # The prior map is cached as tiles of this side beside the source .pcd, and only
+  # the ring around the current fix is held in RAM. 0 disables tiling.
+  tile_size_m: 100.0
+  # How much map to keep around the fix. Rounded UP to whole tiles, so 150/100 is
+  # a 5x5 ring; too small a ring truncates the ICP target at tile edges.
+  crop_radius_m: 150.0
   correction_frequency: 0.5 # Hz. The odometry carries the pose between corrections.
 
   # Coarse-to-fine ICP. The coarse pass runs at coarse_scale times the leaf sizes
@@ -120,14 +126,22 @@ localization: # Track a prior map, downstream of the odometry (bievr_localizatio
   max_consecutive_failures: 5 # Rejections before the fix is dropped and a new seed sought
 
   publish_frequency: 50.0 # Hz, TF + the map-frame pose
-  map_publish_frequency: 0.1 # Hz (the prior map is heavy)
+  # The prior map has no publish rate: it is latched and resent only when the
+  # resident map changes.
+
+  # Localized trajectory as a nav_msgs/Path. One pose per odometry frame; the
+  # whole path is resent every tick, so on a long run cap it here rather than
+  # raising the rate.
+  publish_path: True
+  path_publish_frequency: 10.0 # Hz
+  path_max_poses: 0 # 0 = unlimited; oldest are dropped once reached
 
 debug:
   publish_all_clouds: False # Publish all clouds (fine, coarse, deskewed)
   timing: False
   log: False
   dashboard: True # Fancy live status print (position, biases, timing, ...)
-  dashboard_ascii_path: "" # ASCII art for the dashboard. Empty = bievr_ascii.txt next to the config.
+  dashboard_ascii_path: "bievr_slam_ascii.txt" # ASCII art for the dashboard. Empty = bievr_ascii.txt next to the config.
   trajectory_path: "/home/soula/Desktop/PROJECTS/test_slams/src/BIEVR-LIO-SLAM/output/path_bievr" # Path to save trajectory. If empty, logs will not be saved.
 
 max_num_threads: 0 # 0 = automatic, >0 = number of threads to use for parallel processing

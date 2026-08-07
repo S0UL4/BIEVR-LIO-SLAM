@@ -20,6 +20,12 @@ struct LocalizationConfig {
   double publish_frequency = 50.0;  // Hz, the map->odom + fused pose broadcast
   // The prior map has no publish rate: it goes out when the resident set
   // changes and not otherwise. See Localization::publishMap.
+
+  // Localized trajectory. One pose per odometry frame; the whole path is resent
+  // each tick, so cap it on a long run rather than raising the rate.
+  bool publish_path = true;
+  double path_publish_frequency = 10.0;  // Hz
+  size_t path_max_poses = 0;             // 0 = unlimited, oldest dropped once reached
 };
 
 inline bool loadLocalizationConfig(const std::vector<std::string>& yaml_paths,
@@ -46,6 +52,7 @@ inline bool loadLocalizationConfig(const std::vector<std::string>& yaml_paths,
   c.map_voxel_size_m = yaml.get<double>(s, "map_voxel_size_m", c.map_voxel_size_m);
   c.map_viz_voxel_size_m = yaml.get<double>(s, "map_viz_voxel_size_m", c.map_viz_voxel_size_m);
   c.scan_voxel_size_m = yaml.get<double>(s, "scan_voxel_size_m", c.scan_voxel_size_m);
+  c.tile_size_m = yaml.get<double>(s, "tile_size_m", c.tile_size_m);
   c.crop_radius_m = yaml.get<double>(s, "crop_radius_m", c.crop_radius_m);
   c.correction_frequency = yaml.get<double>(s, "correction_frequency", c.correction_frequency);
 
@@ -70,6 +77,16 @@ inline bool loadLocalizationConfig(const std::vector<std::string>& yaml_paths,
       yaml.get<int>(s, "max_consecutive_failures", c.max_consecutive_failures);
 
   config.publish_frequency = yaml.get<double>(s, "publish_frequency", config.publish_frequency);
+  config.publish_path = yaml.get<bool>(s, "publish_path", config.publish_path);
+  config.path_publish_frequency =
+      yaml.get<double>(s, "path_publish_frequency", config.path_publish_frequency);
+  const int max_poses = yaml.get<int>(s, "path_max_poses", static_cast<int>(config.path_max_poses));
+  if (max_poses < 0) {
+    LOG(E, "Config error: 'localization.path_max_poses' must be >= 0 (0 = unlimited), got "
+               << max_poses << ".");
+    return false;
+  }
+  config.path_max_poses = static_cast<size_t>(max_poses);
   return true;
 }
 
