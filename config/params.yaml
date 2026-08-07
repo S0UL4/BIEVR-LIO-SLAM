@@ -141,7 +141,7 @@ debug:
   timing: False
   log: False
   dashboard: True # Fancy live status print (position, biases, timing, ...)
-  dashboard_ascii_path: "bievr_slam_ascii.txt" # ASCII art for the dashboard. Empty = bievr_ascii.txt next to the config.
+  dashboard_ascii_path: "bievr_slam_ascii.txt" # ASCII art for the dashboard. A bare name is looked up next to the config; empty = bievr_ascii.txt.
   trajectory_path: "/home/soula/Desktop/PROJECTS/test_slams/src/BIEVR-LIO-SLAM/output/path_bievr" # Path to save trajectory. If empty, logs will not be saved.
 
 max_num_threads: 0 # 0 = automatic, >0 = number of threads to use for parallel processing

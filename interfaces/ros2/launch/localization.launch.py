@@ -1,9 +1,12 @@
 """Runs the odometry with localization against a prior map.
 
-This is the same `process_topics` executable as mapping -- the mode is this
-launch file plus `localization.enable`, not a switch inside the pipeline. The
-prior map may be a bundle directory (relocalizes by itself) or a bare .pcd from
-any SLAM (waits for an RViz "2D Pose Estimate" on /initialpose).
+The localization half of the pair with mapping.launch.py. Both drive the same
+`process_topics` executable -- the mode is this launch file, not a switch inside
+the pipeline -- and each one asserts its own mode and turns the other off, so
+whatever the params file says, localization localizes and mapping maps.
+
+The prior map may be a bundle directory (relocalizes by itself) or a bare .pcd
+from any SLAM (waits for an RViz "2D Pose Estimate" on /initialpose).
 
   ros2 launch bievr_lio_ros2 localization.launch.py \\
       sensor_config:=vbr map:=/path/to/bievr_map_bundle
@@ -47,6 +50,9 @@ def launch_setup(context, *args, **kwargs):
     overrides = ['localization:', '  enable: True']
     if prior_map:
         overrides.append('  map_path: "{}"'.format(prior_map))
+    # Loop closure is the mapping mode's job (mapping.launch.py). Left on it
+    # would build a pose graph nothing here consumes.
+    overrides += ['loop_closure:', '  enable: False']
     override_path = os.path.join(tempfile.gettempdir(), 'bievr_localization_overlay.yaml')
     with open(override_path, 'w') as handle:
         handle.write('\n'.join(overrides) + '\n')
