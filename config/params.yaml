@@ -84,7 +84,43 @@ loop_closure: # Scan Context + GTSAM pose graph, downstream of the odometry (bie
   # Destination of the map bundle (cloud.pcd, poses_tum.txt, scan_context.bin,
   # meta.yaml). Relative paths resolve against the working directory. Empty means
   # process_bag does not auto-save; the save_map_bundle service still works.
-  bundle_path: "/home/soula/Desktop/PROJECTS/test_slams/test_biever_bundle"
+  bundle_path: "bievr_map_bundle"
+
+localization: # Track a prior map, downstream of the odometry (bievr_localization)
+  enable: False # Off means the odometry runs exactly as before
+
+  # A .pcd file (any SLAM's map) or a bundle directory. Only a bundle carries the
+  # Scan Context database that lets localization find itself; with a bare cloud it
+  # waits for an /initialpose (RViz "2D Pose Estimate").
+  map_path: "bievr_map_bundle"
+  map_frame: "map" # Parent of the odometry frame. Kept distinct from map.frame above.
+
+  map_voxel_size_m: 0.3 # Leaf applied to the prior map on load; 0 keeps it as stored
+  scan_voxel_size_m: 0.5 # Leaf applied to the scan before ICP
+  crop_radius_m: 150.0 # Prior-map crop around the predicted pose
+  correction_frequency: 0.5 # Hz. The odometry carries the pose between corrections.
+
+  # Coarse-to-fine ICP. The coarse pass runs at coarse_scale times the leaf sizes
+  # and correspondence distance, which is what lets a seed several metres out
+  # converge before the fine pass tightens it.
+  coarse_scale: 10.0
+  icp_max_correspondence_distance: 1.0 # Fine pass [m]
+  icp_max_iterations: 20
+  icp_transformation_epsilon: 1.0e-6
+  icp_euclidean_fitness_epsilon: 1.0e-6
+  # PCL fitness is the MEAN SQUARED correspondence distance [m^2], not an inlier
+  # fraction. Reject above this; needs tuning per environment.
+  fitness_threshold: 1.0
+
+  # Relocalization. Descriptor geometry always comes from the bundle.
+  sc_num_candidates: 3
+  sc_search_ratio: 0.1
+  sc_dist_threshold: 0.2 # Tighter than mapping: a false seed is expensive here
+  use_sc_yaw_guess: True
+  max_consecutive_failures: 5 # Rejections before the fix is dropped and a new seed sought
+
+  publish_frequency: 50.0 # Hz, TF + the map-frame pose
+  map_publish_frequency: 0.1 # Hz (the prior map is heavy)
 
 debug:
   publish_all_clouds: False # Publish all clouds (fine, coarse, deskewed)

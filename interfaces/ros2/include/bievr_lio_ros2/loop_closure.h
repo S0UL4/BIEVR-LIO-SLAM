@@ -65,7 +65,7 @@ class LoopClosure {
                                           [this] { publishMap(); }, heavy_group_);
 
     // Registering last: nothing reaches the LoopCloser until it is fully built.
-    pipeline->setFrameObserver(
+    pipeline->addFrameObserver(
         [this](uint64_t stamp, const Transform& T_W_I, const Pointcloud& undistorted) {
           closer_->addFrame(stamp, T_W_I, undistorted);
         });

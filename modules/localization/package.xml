@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>bievr_pgo</name>
+  <name>bievr_localization</name>
   <version>0.0.0</version>
-  <description>Scan Context loop closure and GTSAM pose graph, downstream of the BIEVR odometry</description>
+  <description>Tracks a prior map by ICP, downstream of the BIEVR odometry, seeded either by a Scan Context match or by a requested pose</description>
 
   <maintainer email="ihebtn5@gmail.com">soula</maintainer>
 

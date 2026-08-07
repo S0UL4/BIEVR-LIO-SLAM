@@ -29,6 +29,7 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include "bievr_lio/common.h"
+#include "bievr_map_io/prior_map.h"
 #include "bievr_scancontext/scan_context.h"
 
 namespace bievr {

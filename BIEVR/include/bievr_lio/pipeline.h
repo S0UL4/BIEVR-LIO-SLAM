@@ -78,12 +78,15 @@ class Pipeline {
     publishers_[typeid(T)] = wrapper;
   }
 
-  // Optional consumer of every registered frame, for downstream modules (loop
-  // closure, localization). Called on the odometry thread, so it must copy and
-  // return rather than do work inline. Unset by default.
+  // Consumers of every registered frame, for downstream modules (loop closure,
+  // localization). Called on the odometry thread, so they must copy and return
+  // rather than do work inline. A list rather than a single slot so two modules
+  // in one process cannot silently steal it from each other. None by default.
   using FrameObserver = std::function<void(uint64_t stamp, const Transform& T_W_I,
                                            const Pointcloud& undistorted_I)>;
-  void setFrameObserver(FrameObserver observer) { frame_observer_ = std::move(observer); }
+  void addFrameObserver(FrameObserver observer) {
+    frame_observers_.push_back(std::move(observer));
+  }
 
  private:
   enum class Phase { NeedBias, NeedMap, Running };
@@ -153,7 +156,7 @@ class Pipeline {
   using PublishFunction =
       std::function<void(const void*, const Header&, const std::string&, const std::string&)>;
   std::unordered_map<std::type_index, PublishFunction> publishers_;
-  FrameObserver frame_observer_;
+  std::vector<FrameObserver> frame_observers_;
   std::shared_ptr<std::ofstream> tum_log_;
 
   // Accumulated state for the live status dashboard (printDashboard in utils).

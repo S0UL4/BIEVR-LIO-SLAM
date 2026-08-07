@@ -22,6 +22,9 @@
 #ifdef BIEVR_WITH_PGO
 #include "bievr_lio_ros2/loop_closure.h"
 #endif
+#ifdef BIEVR_WITH_LOCALIZATION
+#include "bievr_lio_ros2/localization.h"
+#endif
 
 using namespace std::chrono_literals;
 
@@ -62,6 +65,27 @@ int main(int argc, char** argv) {
     loop_closure = std::make_unique<bievr::LoopClosure>(node, pipeline, loop_closure_config,
                                                         "bievr_lio");
     LOG(I, "Loop closure enabled.");
+  }
+#endif
+
+#ifdef BIEVR_WITH_LOCALIZATION
+  // Localization is the other downstream observer: it tracks a prior map and
+  // publishes map -> odom, never correcting the odometry itself.
+  std::unique_ptr<bievr::Localization> localization;
+  bievr::LocalizationConfig localization_config;
+  if (!bievr::loadLocalizationConfig(config.yaml_paths, localization_config)) {
+    LOG(E, "Failed to load localization config.");
+    return -1;
+  }
+  if (localization_config.enable) {
+    localization = std::make_unique<bievr::Localization>(node, pipeline, localization_config,
+                                                         "bievr_lio");
+    std::string message;
+    if (!localization->start(&message)) {
+      LOG(E, "Localization enabled but its prior map could not be loaded: " << message);
+      return -1;
+    }
+    LOG(I, "Localization enabled. " << message);
   }
 #endif
 

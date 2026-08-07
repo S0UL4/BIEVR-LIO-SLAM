@@ -296,4 +296,15 @@ bool ScanContext::load(const std::string& path) {
   return true;
 }
 
+void ScanContext::truncate(size_t count) {
+  if (count >= descriptors_.size()) return;
+  descriptors_.resize(count);
+  ring_keys_.resize(count);
+  // Both trees index the vectors that just shrank.
+  tree_.reset();
+  tree_counter_ = 0;
+  batch_tree_.reset();
+  batch_size_ = 0;
+}
+
 }  // namespace bievr

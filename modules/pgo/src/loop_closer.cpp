@@ -2,7 +2,6 @@
 
 #include <pcl/common/transforms.h>
 #include <pcl/filters/voxel_grid.h>
-#include <pcl/io/pcd_io.h>
 #include <pcl/registration/icp.h>
 
 #include <gtsam/slam/BetweenFactor.h>
@@ -10,9 +9,6 @@
 
 #include <chrono>
 #include <cmath>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <limits>
 
@@ -446,63 +442,29 @@ bool LoopCloser::saveMapBundle(const std::string& dir, std::string* message) con
     return false;
   };
 
-  // Single snapshot for both files: cloud.pcd and poses_tum.txt must describe
-  // the same graph even if iSAM2 re-optimizes mid-save.
+  // Snapshot the keyframes and the descriptors back to back. They are appended
+  // under different locks, so any work between these two lines desynchronises
+  // the pose/descriptor index alignment that relocalization reads them by.
   const Snapshot snap = snapshot();
-  if (snap.clouds.empty()) return fail("No keyframes accumulated yet.");
-  const std::vector<gtsam::Pose3>& poses = snap.poses;
-  const std::vector<uint64_t>& stamps = snap.stamps;
-
-  std::error_code ec;
-  std::filesystem::create_directories(dir, ec);
-  if (ec) return fail("Cannot create " + dir + ": " + ec.message());
-
-  const std::filesystem::path root(dir);
-
-  const Cloud::Ptr map = accumulate(snap, config_.map_save_resolution);
-  if (pcl::io::savePCDFileBinary((root / "cloud.pcd").string(), *map) != 0) {
-    return fail("Failed to write cloud.pcd");
-  }
-
-  std::ofstream poses_file((root / "poses_tum.txt").string());
-  if (!poses_file) return fail("Failed to write poses_tum.txt");
-  poses_file << std::fixed << std::setprecision(9);
-  for (size_t i = 0; i < poses.size() && i < stamps.size(); ++i) {
-    const gtsam::Point3 t = poses[i].translation();
-    const gtsam::Quaternion q = poses[i].rotation().toQuaternion();
-    poses_file << nsToS(stamps[i]) << " " << t.x() << " " << t.y() << " " << t.z() << " " << q.x()
-               << " " << q.y() << " " << q.z() << " " << q.w() << "\n";
-  }
-
-  // Copy the descriptors under the lock, write them outside it: holding sc_mutex_
-  // across the write would stall add() and detectLoop() for the whole IO.
-  ScanContext::Archive sc_archive;
+  ScanContext::Archive descriptors;
   {
     std::lock_guard<std::mutex> lock(sc_mutex_);
-    sc_archive = scan_context_.archive();
+    descriptors = scan_context_.archive();
   }
-  if (!ScanContext::saveArchive(sc_archive, (root / "scan_context.bin").string())) {
-    return fail("Failed to write scan_context.bin");
-  }
+  if (snap.clouds.empty()) return fail("No keyframes accumulated yet.");
 
-  std::ofstream meta((root / "meta.yaml").string());
-  if (!meta) return fail("Failed to write meta.yaml");
-  const auto& sc = config_.scan_context;
-  meta << "frame: \"" << config_.map_frame << "\"\n"
-       << "num_keyframes: " << poses.size() << "\n"
-       << "num_points: " << map->size() << "\n"
-       << "map_save_resolution_m: " << config_.map_save_resolution << "\n"
-       << "scan_context:\n"
-       << "  num_rings: " << sc.num_rings << "\n"
-       << "  num_sectors: " << sc.num_sectors << "\n"
-       << "  max_radius_m: " << sc.max_radius << "\n"
-       << "  lidar_height_m: " << sc.lidar_height << "\n";
+  std::vector<Transform> poses;
+  poses.reserve(snap.poses.size());
+  for (const gtsam::Pose3& pose : snap.poses) poses.push_back(toTransform(pose));
 
-  if (message) {
-    *message = "Saved " + std::to_string(map->size()) + " points from " +
-               std::to_string(poses.size()) + " keyframes to " + root.string();
-  }
-  return true;
+  MapMeta meta;
+  meta.frame = config_.map_frame;
+  meta.map_save_resolution_m = config_.map_save_resolution;
+  meta.keyframe_filter_size_m = config_.keyframe_filter_size;
+  meta.scan_context = config_.scan_context;
+
+  const Cloud::Ptr map = accumulate(snap, config_.map_save_resolution);
+  return bievr::saveMapBundle(dir, *map, poses, snap.stamps, descriptors, meta, message);
 }
 
 }  // namespace bievr

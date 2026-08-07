@@ -354,7 +354,9 @@ inline bool loadConfigFromYaml(const std::vector<std::string>& yaml_paths, Confi
 // (ros::init does this in place on ROS1; rclcpp::remove_ros_arguments on ROS2).
 inline bool loadConfigFromArgs(const std::vector<std::string>& args, Config& config) {
   std::string sensor_config_file;
-  std::string params_file;
+  // Repeatable, so a launch file can layer a small overlay on top of the shared
+  // params instead of having to copy and patch the whole file.
+  std::vector<std::string> params_files;
   std::string bag_path;
   bool have_bag = false;
 
@@ -369,7 +371,8 @@ inline bool loadConfigFromArgs(const std::vector<std::string>& args, Config& con
     if (args[i] == "--sensor_config_file") {
       sensor_config_file = value("--sensor_config_file");
     } else if (args[i] == "--params_file") {
-      params_file = value("--params_file");
+      const std::string path = value("--params_file");
+      if (!path.empty()) params_files.push_back(path);
     } else if (args[i] == "--bag") {
       bag_path = value("--bag");
       have_bag = true;
@@ -378,9 +381,11 @@ inline bool loadConfigFromArgs(const std::vector<std::string>& args, Config& con
     }
   }
 
-  // Later files override earlier ones: params first, then sensor config, so the
-  // sensor file wins on any leaf the two files share.
-  if (!loadConfigFromYaml({params_file, sensor_config_file}, config)) {
+  // Later files override earlier ones: params in the order given, then sensor
+  // config, so the sensor file wins on any leaf it shares with them.
+  std::vector<std::string> paths = params_files;
+  paths.push_back(sensor_config_file);
+  if (!loadConfigFromYaml(paths, config)) {
     return false;
   }
   // The bag path is a launch argument, not part of the shared YAML config; only

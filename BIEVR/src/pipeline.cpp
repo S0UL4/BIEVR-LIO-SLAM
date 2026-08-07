@@ -361,7 +361,9 @@ void Pipeline::publishFrame(const Header& header, const Transform& T_W_I,
   // intensity row still lines up with it.
   publish(IntensityPointcloud(undistorted, intensities), body_header, "points/undistorted");
   publishLatestState(header);
-  if (frame_observer_) frame_observer_(header.stamp, T_W_I, undistorted);
+  for (const FrameObserver& observer : frame_observers_) {
+    observer(header.stamp, T_W_I, undistorted);
+  }
 }
 
 void Pipeline::publishLatestState(const Header& header) {

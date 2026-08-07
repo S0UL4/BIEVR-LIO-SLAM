@@ -74,6 +74,10 @@ class ScanContext {
   Archive archive() const { return Archive{config_, descriptors_}; }
   static bool saveArchive(const Archive& archive, const std::string& path);
 
+  // Drops everything past `count`, for callers reconciling the database with a
+  // pose list it must stay index-aligned with. A no-op when already smaller.
+  void truncate(size_t count);
+
   size_t size() const { return descriptors_.size(); }
   const Config& config() const { return config_; }
 

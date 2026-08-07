@@ -40,6 +40,10 @@ find_package(livox_ros_driver2 QUIET)
 # builds and runs, it just cannot be enabled from the config.
 find_package(bievr_pgo QUIET)
 
+# Localization is optional in the same way: without bievr_localization the
+# odometry still builds and runs, it just cannot be enabled from the config.
+find_package(bievr_localization QUIET)
+
 set(ament_dependencies
   rclcpp
   sensor_msgs
@@ -86,12 +90,22 @@ foreach(target process_topics process_bag)
     target_compile_definitions(${target} PRIVATE BIEVR_WITH_PGO)
     target_link_libraries(${target} bievr_pgo::bievr_pgo)
   endif()
+  if(bievr_localization_FOUND)
+    target_compile_definitions(${target} PRIVATE BIEVR_WITH_LOCALIZATION)
+    target_link_libraries(${target} bievr_localization::bievr_localization)
+  endif()
 endforeach()
 
 if(bievr_pgo_FOUND)
   message(STATUS "bievr_lio_ros2: bievr_pgo found, loop closure available.")
 else()
   message(STATUS "bievr_lio_ros2: bievr_pgo NOT found, building without loop closure.")
+endif()
+
+if(bievr_localization_FOUND)
+  message(STATUS "bievr_lio_ros2: bievr_localization found, localization available.")
+else()
+  message(STATUS "bievr_lio_ros2: bievr_localization NOT found, building without localization.")
 endif()
 
 # ---- Install ----

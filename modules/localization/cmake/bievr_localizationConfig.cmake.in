@@ -5,9 +5,6 @@ include(CMakeFindDependencyMacro)
 if(NOT TARGET Eigen3::Eigen)
   find_dependency(Eigen3)
 endif()
-if(NOT TARGET gtsam)
-  find_dependency(GTSAM)
-endif()
 # Same VTK/MPI workaround as the build: find_dependency(PCL) runs in the
 # consumer's scope, where nothing has satisfied MPI::MPI_C either.
 find_package(MPI QUIET)
@@ -15,10 +12,11 @@ if(NOT TARGET MPI::MPI_C)
   add_library(MPI::MPI_C INTERFACE IMPORTED)
 endif()
 find_dependency(PCL COMPONENTS common io filters registration)
+find_dependency(yaml-cpp)
 find_dependency(bievr_lio)
 find_dependency(bievr_scancontext)
 find_dependency(bievr_map_io)
 
-include("${CMAKE_CURRENT_LIST_DIR}/bievr_pgoTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/bievr_localizationTargets.cmake")
 
-check_required_components(bievr_pgo)
+check_required_components(bievr_localization)
