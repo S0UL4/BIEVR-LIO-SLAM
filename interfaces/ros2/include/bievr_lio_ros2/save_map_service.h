@@ -30,7 +30,7 @@ class SaveMapService {
       : pipeline_(std::move(pipeline)) {
     group_ = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     srv_ = node->create_service<std_srvs::srv::Trigger>(
-        "~/save_map",
+        "~/save_map_drifted",
         [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
                std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
           std::string written;
