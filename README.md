@@ -14,18 +14,14 @@
   <b>BIEVR odometry-only map &nbsp;vs&nbsp; BIEVR-LIO-SLAM map</b>
 </p>
 <p align="center">
-  <!-- To play on GitHub this src must be an uploaded asset URL, not a repo path:
-       drag doc/output.mp4 into any issue comment and paste the resulting
-       https://github.com/user-attachments/assets/... link here. -->
-  <video width='100%' src="doc/output.mp4" controls muted loop></video>
+  <img width='100%' src="doc/odometry_vs_slam.gif">
 </p>
 
 <p align="center">
   <b>Localization on a pre-built map</b>
 </p>
 <p align="center">
-  <!-- Same as above: replace this src with the uploaded asset URL to play on GitHub. -->
-  <video width='100%' src="doc/localization.mp4" controls muted loop></video>
+  <img width='100%' src="doc/localization.gif">
 </p>
 
 BIEVR-LIO is a robust LiDAR-Inertial **Odometry** framework that uses a
