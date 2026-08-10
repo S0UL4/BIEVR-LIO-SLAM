@@ -89,7 +89,7 @@ std::string dashMs(double seconds) {
 
 void printDashboardBanner(const std::string& ascii, const std::string& message) {
   std::ostringstream out;
-  out << "\033[2J\033[1;1H";  // clear screen and move cursor home
+  out << "\033[2J\033[1;1H\n";  // clear screen and move cursor home
   if (!ascii.empty()) {
     out << ascii << "\n";
   }
