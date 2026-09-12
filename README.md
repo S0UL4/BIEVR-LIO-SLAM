@@ -192,7 +192,7 @@ honest than a fake identity that puts the robot at the map origin.
       in FAST_LIO_LOCALIZATION. Visible as a small jump at the correction rate.
       Interpolating the correction between cycles would make the fused pose
       continuous without touching the odometry.
-- [ ] **GPS altitude constraints in the pose graph, to kill Z drift.**
+- [✓] **GPS altitude constraints in the pose graph, to kill Z drift.**
 - [ ] Recovery from `LOST` on a cloud-only map, plus an `initial_pose` in YAML and a
       yaw sweep so a map without descriptors can seed itself.
 - [ ] A teach pass that lets a foreign `.pcd` earn a descriptor database from a
