@@ -11,6 +11,7 @@
 #include <rosbag2_cpp/reader.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -85,10 +86,18 @@ int main(int argc, char** argv) {
   const std::string& pc_topic = config.topic_config.pointcloud_topic;
   const std::string& imu_topic = config.topic_config.imu_topic;
 
+  #ifdef BIEVR_WITH_PGO
+    const std::string gps_topic =
+        loop_closure_config.closer.use_gps_altitude ? loop_closure_config.gps_topic : "";
+  #else
+    const std::string gps_topic;
+  #endif
+
+
   while (rclcpp::ok() && reader.has_next()) {
     auto bag_msg = reader.read_next();
     const std::string& topic = bag_msg->topic_name;
-    if (topic != pc_topic && topic != imu_topic) {
+    if (topic != pc_topic && topic != imu_topic && (gps_topic.empty() || topic != gps_topic)) {
       continue;
     }
 
@@ -115,6 +124,14 @@ int main(int argc, char** argv) {
       bievr::msgToImuMeasurement(msg, imu);
       synchronizer->addImu(imu);
     }
+
+#ifdef BIEVR_WITH_PGO
+    else if (type == "sensor_msgs/msg/NavSatFix") {
+      auto msg = deserialize<sensor_msgs::msg::NavSatFix>(serialized);
+      if (loop_closure) loop_closure->onGps(msg);
+    }
+#endif
+
 
     // Bag playback never spins, so serve any pending save_map call here.
     rclcpp::spin_some(node);
@@ -152,7 +169,9 @@ int main(int argc, char** argv) {
     const auto stats = loop_closure->stats();
     LOG(I, "Loop closure: " << stats.num_keyframes << " keyframes, " << stats.num_loops
                             << " loops accepted, " << stats.num_rejected << " rejected, "
+                            << stats.num_gps << " GPS factors, "
                             << stats.dropped_frames << " frames dropped.");
+
     std::string message;
     if (loop_closure->saveBundle(&message)) {
       LOG(I, message);

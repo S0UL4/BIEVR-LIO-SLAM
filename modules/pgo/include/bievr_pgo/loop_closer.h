@@ -66,6 +66,14 @@ class LoopCloser {
     double loop_noise_score = 0.5;
     double loop_noise_cauchy_c = 1.0;
 
+    // GPS config
+    bool use_gps_altitude = false;
+    double gps_noise_z = 3.0;         // sigma of the altitude measurement [m]
+    double gps_max_time_diff = 0.15;  // fix must be this close to the keyframe [s]
+    double gps_min_distance = 5.0;    // travel between two GPS factors [m]
+    double gps_max_variance = 25.0;   // reject fixes reporting worse than this [m^2]
+    size_t gps_max_buffer = 400;
+
     double isam_relinearize_threshold = 0.01;
     int isam_relinearize_skip = 1;
     double isam_frequency = 10.0;  // Hz
@@ -86,6 +94,8 @@ class LoopCloser {
     size_t num_loops = 0;      // loop factors accepted
     size_t num_rejected = 0;   // candidates that failed the fitness test
     size_t dropped_frames = 0;
+    size_t num_gps = 0;  // GPS factors added
+
   };
 
   explicit LoopCloser(Config config);
@@ -96,6 +106,7 @@ class LoopCloser {
 
   // Odometry-thread entry point. Returns immediately.
   void addFrame(uint64_t stamp, const Transform& T_W_I, const Pointcloud& cloud_body);
+  void addGps(uint64_t stamp, double altitude, double variance);
 
   std::vector<Keyframe> keyframes() const;
   Stats stats() const;
@@ -116,6 +127,12 @@ class LoopCloser {
     uint64_t stamp;
     Transform pose;
     Cloud::Ptr cloud;  // body frame, downsampled
+  };
+
+  struct GpsSample {
+    uint64_t stamp;
+    double altitude;
+    double variance;
   };
 
   struct LoopCandidate {
@@ -142,6 +159,10 @@ class LoopCloser {
   bool waitOrStop(std::chrono::duration<double> period);
 
   void integrateKeyframe(PendingFrame frame);
+  // Nearest fix to `stamp`, or nullopt when none is close enough.
+  std::optional<GpsSample> gpsAt(uint64_t stamp) const;
+  // add altitude factor for keyframe 'index'
+  void maybeAddGpsFactor(int index, const gtsam::Pose3& pose, uint64_t stamp);
   // World-frame submap of keyframes within +-span of `key`, each at its own pose.
   Cloud::Ptr buildSubmap(int key, int span) const;
   // Every keyframe at its optimized pose, voxel-thinned when resolution > 0.
@@ -185,6 +206,15 @@ class LoopCloser {
   std::deque<LoopCandidate> candidates_;
 
   mutable std::mutex graph_mutex_;
+
+  // gps altitude mutex and buffer 
+  mutable std::mutex gps_mutex_;
+  std::deque<GpsSample> gps_buffer_; 
+  // anchor gps ( z = 0)
+  std::optional<double> gps_anchor_altitude_;
+  std::optional<gtsam::Point3> last_gps_position_;
+  std::atomic<size_t> num_gps_{0};
+
   gtsam::NonlinearFactorGraph graph_;
   gtsam::Values initial_estimate_;
   std::unique_ptr<gtsam::ISAM2> isam_;
@@ -193,6 +223,7 @@ class LoopCloser {
   gtsam::SharedNoiseModel prior_noise_;
   gtsam::SharedNoiseModel odom_noise_;
   gtsam::SharedNoiseModel loop_noise_;
+  gtsam::SharedNoiseModel gps_noise_;
 
   std::atomic<size_t> num_loops_{0};
   std::atomic<size_t> num_rejected_{0};

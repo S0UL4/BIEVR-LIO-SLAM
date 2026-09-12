@@ -18,6 +18,7 @@
 #include <memory>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <sensor_msgs/msg/nav_sat_fix.hpp> // for gps factor
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_srvs/srv/trigger.hpp>
@@ -64,11 +65,37 @@ class LoopClosure {
     map_timer_ = node_->create_wall_timer(periodFrom(config_.map_publish_frequency),
                                           [this] { publishMap(); }, heavy_group_);
 
+      // gps init subscription, if enabled, for gps altitude factor only :) 
+    if (config_.closer.use_gps_altitude && !config_.gps_topic.empty()) {
+      // Own group: the odometry runs inline in the sensor callbacks, so this
+      // must not be able to sit in front of them.
+      gps_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+      rclcpp::SubscriptionOptions options;
+      options.callback_group = gps_group_;
+      gps_sub_ = node_->create_subscription<sensor_msgs::msg::NavSatFix>(
+          config_.gps_topic, rclcpp::SensorDataQoS(),
+          [this](const sensor_msgs::msg::NavSatFix::SharedPtr msg) { onGps(*msg); }, options);
+    }
+
+
+
+
     // Registering last: nothing reaches the LoopCloser until it is fully built.
     pipeline->addFrameObserver(
         [this](uint64_t stamp, const Transform& T_W_I, const Pointcloud& undistorted) {
           closer_->addFrame(stamp, T_W_I, undistorted);
         });
+  }
+
+
+  void onGps(const sensor_msgs::msg::NavSatFix& msg) {
+    //if (msg.status.status < sensor_msgs::msg::NavSatStatus::STATUS_FIX) return;
+    // if (msg.position_covariance_type == sensor_msgs::msg::NavSatFix::COVARIANCE_TYPE_UNKNOWN) {
+    //   return;
+    // }
+    if (!std::isfinite(msg.altitude)) return;
+    // position_covariance is a row-major ENU 3x3, so [8] is the altitude variance.
+    closer_->addGps(bievr::conv_detail::stampToNs(msg.header.stamp), msg.altitude, msg.position_covariance[8]);
   }
 
   LoopCloser::Stats stats() const { return closer_->stats(); }
@@ -77,6 +104,11 @@ class LoopClosure {
     return closer_->saveMapBundle(bundle_path_, message);
   }
   const std::string& bundlePath() const { return bundle_path_; }
+
+
+
+
+
 
  private:
   static std::chrono::nanoseconds periodFrom(double hz) {
@@ -130,6 +162,10 @@ class LoopClosure {
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_pub_;
   rclcpp::CallbackGroup::SharedPtr heavy_group_;
+  // Gps
+  rclcpp::CallbackGroup::SharedPtr gps_group_;
+  rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr gps_sub_;
+  // Services and timers
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr save_srv_;
   rclcpp::TimerBase::SharedPtr path_timer_;
   rclcpp::TimerBase::SharedPtr map_timer_;

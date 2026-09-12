@@ -8,7 +8,7 @@ map:
   frame: "odom"
 
 preprocess:
-  downsample_resolution_m: 0.1 # Downsample points to this resolution [m]. In case of informed sampling, this
+  downsample_resolution_m: 0.05 # Downsample points to this resolution [m]. In case of informed sampling, this
   # corresponds to the high resolution voxels
   informed_sampling: True
 
@@ -32,7 +32,7 @@ map_save: # THIS IS FOR THE PURE ODOMETRY MAP, NOT THE LOOP-CLOSED ONE. Use the 
 loop_closure: # Scan Context + GTSAM pose graph, downstream of the odometry (bievr_pgo)
   enable: True # Off means the odometry runs exactly as before
 
-  keyframe_meter_gap: 1.0 # Keep a keyframe every k m of travel
+  keyframe_meter_gap: 0.5 # Keep a keyframe every k m of travel
   keyframe_deg_gap: 15.0 # ...or every k deg of rotation
   keyframe_filter_size: 0.4 # Voxel leaf of the stored keyframe cloud [m]
   icp_filter_size: 0.4 # Voxel leaf of the loop-closure submap [m]
@@ -44,11 +44,11 @@ loop_closure: # Scan Context + GTSAM pose graph, downstream of the odometry (bie
   # Added to every point's z. Must exceed the depth of the lowest surface below
   # the sensor, with margin: too small and ground bins go negative and collide
   # with the 0 that marks an empty bin, which measurably worsens matching.
-  sc_lidar_height: 2.0
+  sc_lidar_height: 1.5
   sc_num_exclude_recent: 30 # Keyframes before the query that cannot close a loop ( the gap lets stay )
   sc_num_candidates: 3
   sc_search_ratio: 0.1
-  sc_dist_threshold: 0.5 # 0.1-0.15 for fewer false loops
+  sc_dist_threshold: 0.3 # 0.1-0.15 for fewer false loops
   sc_tree_making_period: 30 # Rebuild the kd-tree every N queries
   loop_detect_frequency: 1.0 # Hz
 
@@ -59,19 +59,27 @@ loop_closure: # Scan Context + GTSAM pose graph, downstream of the odometry (bie
   icp_transformation_epsilon: 1.0e-6
   icp_euclidean_fitness_epsilon: 1.0e-6
   icp_ransac_iterations: 0
-  loop_fitness_score_threshold: 0.2 # Reject loops scoring above this
+  loop_fitness_score_threshold: 0.3 # Reject loops scoring above this
   # Seed ICP with Scan Context's yaw instead of identity. Measured worse on the
   # reference session (1.981 -> 2.156 m RMSE); only useful when revisits run in
   # the opposite direction, where identity cannot converge.
-  use_sc_yaw_guess: False
-  sc_yaw_guess_min_deg: 45.0
+  use_sc_yaw_guess: True
+  sc_yaw_guess_min_deg: 0.0
 
   # Factor graph noise (variances)
   prior_noise_score: 1.0e-12
   odom_noise_rotation: 1.0e-6
   odom_noise_translation: 1.0e-4
-  loop_noise_score: 0.5
+  loop_noise_score: 0.05
   loop_noise_cauchy_c: 1.0
+
+  # GPS altitude, to stop Z drift. Only height is constrained.
+  use_gps_altitude: True
+  gps_topic: /gps/fix
+  gps_noise_z: 3.0 # Sigma of the altitude measurement [m]; GPS height is poor
+  gps_max_time_diff: 0.15 # Fix must be this close to the keyframe [s]
+  gps_min_distance: 5.0 # Travel between two GPS factors [m]
+  gps_max_variance: 25.0 # Reject fixes reporting worse than this [m^2]
 
   isam_relinearize_threshold: 0.01
   isam_relinearize_skip: 1
@@ -95,9 +103,9 @@ localization: # Track a prior map, downstream of the odometry (bievr_localizatio
   map_path: "bievr_map_bundle"
   map_frame: "map" # Parent of the odometry frame. Kept distinct from map.frame above.
 
-  map_voxel_size_m: 0.3 # Leaf applied to the prior map on load; 0 keeps it as stored
+  map_voxel_size_m: 0.4 # Leaf applied to the prior map on load; 0 keeps it as stored
   map_viz_voxel_size_m: 0.0 # Coarser leaf for the published copy; 0 publishes it as loaded
-  scan_voxel_size_m: 0.5 # Leaf applied to the scan before ICP
+  scan_voxel_size_m: 0.4 # Leaf applied to the scan before ICP
   # The prior map is cached as tiles of this side beside the source .pcd, and only
   # the ring around the current fix is held in RAM. 0 disables tiling.
   tile_size_m: 100.0
@@ -139,7 +147,7 @@ localization: # Track a prior map, downstream of the odometry (bievr_localizatio
 debug:
   publish_all_clouds: False # Publish all clouds (fine, coarse, deskewed)
   timing: False
-  log: False
+  log: True
   dashboard: True # Fancy live status print (position, biases, timing, ...)
   dashboard_ascii_path: "bievr_slam_ascii.txt" # ASCII art for the dashboard. A bare name is looked up next to the config; empty = bievr_ascii.txt.
   trajectory_path: "/home/soula/Desktop/PROJECTS/test_slams/src/BIEVR-LIO-SLAM/output/path_bievr" # Path to save trajectory. If empty, logs will not be saved.

@@ -6,6 +6,7 @@
 
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
+#include <gtsam/navigation/GPSFactor.h> 
 
 #include <chrono>
 #include <cmath>
@@ -91,7 +92,12 @@ void LoopCloser::initNoiseModels() {
   loop_noise_ = gtsam::noiseModel::Robust::Create(
       gtsam::noiseModel::mEstimator::Cauchy::Create(config_.loop_noise_cauchy_c),
       gtsam::noiseModel::Diagonal::Variances(loop_variance));
-}
+    // ok gps constrains on z only so the x,y variance is set to a very high value
+  gtsam::Vector3 gps_variance;
+  gps_variance << 1e8, 1e8, config_.gps_noise_z * config_.gps_noise_z;
+  gps_noise_ = gtsam::noiseModel::Diagonal::Variances(gps_variance);
+
+  }
 
 void LoopCloser::addFrame(uint64_t stamp, const Transform& T_W_I, const Pointcloud& cloud_body) {
   // Gate here, on the odometry thread: it is a pose delta only, and it saves
@@ -132,6 +138,37 @@ void LoopCloser::addFrame(uint64_t stamp, const Transform& T_W_I, const Pointclo
   }
   queue_cv_.notify_one();
 }
+
+
+void LoopCloser::addGps(uint64_t stamp, double altitude, double variance) {
+  if (!config_.use_gps_altitude) return;
+  std::lock_guard<std::mutex> lock(gps_mutex_);
+  // Out-of-order fixes would break the nearest search, and there is nothing
+  // useful to do with them anyway.
+  if (!gps_buffer_.empty() && stamp <= gps_buffer_.back().stamp) return;
+  gps_buffer_.push_back({stamp, altitude, variance});
+  while (gps_buffer_.size() > config_.gps_max_buffer) gps_buffer_.pop_front();
+}
+
+std::optional<LoopCloser::GpsSample> LoopCloser::gpsAt(uint64_t stamp) const {
+  const uint64_t tolerance = static_cast<uint64_t>(config_.gps_max_time_diff * 1e9);
+  std::lock_guard<std::mutex> lock(gps_mutex_);
+
+  const GpsSample* best = nullptr;
+  uint64_t best_diff = std::numeric_limits<uint64_t>::max();
+  for (const auto& sample : gps_buffer_) {
+    const uint64_t diff = sample.stamp > stamp ? sample.stamp - stamp : stamp - sample.stamp;
+    if (diff < best_diff) {
+      best_diff = diff;
+      best = &sample;
+    }
+  }
+  if (!best || best_diff > tolerance) return std::nullopt;
+  return *best;
+}
+
+
+
 
 void LoopCloser::keyframeWorker() {
   while (true) {
@@ -191,7 +228,36 @@ void LoopCloser::integrateKeyframe(PendingFrame frame) {
                                                   previous_odom_pose.between(pose), odom_noise_));
     initial_estimate_.insert(index, pose);
   }
+  maybeAddGpsFactor(index, pose, frame.stamp); // add gps factor if available
 }
+
+void LoopCloser::maybeAddGpsFactor(int index, const gtsam::Pose3& pose, uint64_t stamp) {
+  if (!config_.use_gps_altitude) return;
+  const auto sample = gpsAt(stamp);
+  if (!sample || sample->variance > config_.gps_max_variance) return;
+
+  // The first accepted fix defines z = 0. Anchoring to the odometry's own z at
+  // that instant keeps the first factor's residual at zero, so it cannot fight
+  // the near-rigid prior on key 0.
+  if (!gps_anchor_altitude_) gps_anchor_altitude_ = sample->altitude - pose.z();
+
+  // One factor per keyframe would let GPS outvote the odometry, so space them.
+  if (last_gps_position_ &&
+      (pose.translation() - *last_gps_position_).norm() < config_.gps_min_distance) {
+    return;
+  }
+  last_gps_position_ = pose.translation();
+
+  // x and y have ~1e8 variance, so feeding the odometry's own values back keeps
+  // their residual at zero and leaves altitude as the only real constraint.
+  const double z = sample->altitude - *gps_anchor_altitude_;
+  graph_.add(gtsam::GPSFactor(index, gtsam::Point3(pose.x(), pose.y(), z), gps_noise_));
+  ++num_gps_;
+}
+
+
+
+
 
 void LoopCloser::loopDetectWorker() {
   const auto period = std::chrono::duration<double>(1.0 / config_.loop_detect_frequency);
@@ -433,6 +499,7 @@ LoopCloser::Stats LoopCloser::stats() const {
   stats.num_loops = num_loops_;
   stats.num_rejected = num_rejected_;
   stats.dropped_frames = dropped_frames_;
+  stats.num_gps = num_gps_;
   return stats;
 }
 

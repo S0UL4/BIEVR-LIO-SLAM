@@ -22,6 +22,9 @@ struct LoopClosureConfig {
   // Destination of the map bundle. Empty means process_bag does not auto-save;
   // the save_map_bundle service still works.
   std::string bundle_path = "bievr_map_bundle";
+
+  // gps topic 
+  std::string gps_topic = "/gps/fix";
 };
 
 inline bool loadLoopClosureConfig(const std::vector<std::string>& yaml_paths,
@@ -82,6 +85,13 @@ inline bool loadLoopClosureConfig(const std::vector<std::string>& yaml_paths,
   c.loop_noise_score = yaml.get<double>(s, "loop_noise_score", c.loop_noise_score);
   c.loop_noise_cauchy_c = yaml.get<double>(s, "loop_noise_cauchy_c", c.loop_noise_cauchy_c);
 
+  // GPS config
+  c.use_gps_altitude = yaml.get<bool>(s, "use_gps_altitude", c.use_gps_altitude);
+  c.gps_noise_z = yaml.get<double>(s, "gps_noise_z", c.gps_noise_z);
+  c.gps_max_time_diff = yaml.get<double>(s, "gps_max_time_diff", c.gps_max_time_diff);
+  c.gps_min_distance = yaml.get<double>(s, "gps_min_distance", c.gps_min_distance);
+  c.gps_max_variance = yaml.get<double>(s, "gps_max_variance", c.gps_max_variance);
+
   c.isam_relinearize_threshold =
       yaml.get<double>(s, "isam_relinearize_threshold", c.isam_relinearize_threshold);
   c.isam_relinearize_skip = yaml.get<int>(s, "isam_relinearize_skip", c.isam_relinearize_skip);
@@ -97,6 +107,8 @@ inline bool loadLoopClosureConfig(const std::vector<std::string>& yaml_paths,
   config.map_publish_frequency =
       yaml.get<double>(s, "map_publish_frequency", config.map_publish_frequency);
   config.bundle_path = yaml.get<std::string>(s, "bundle_path", config.bundle_path);
+  // get gps topic
+  config.gps_topic = yaml.get<std::string>(s, "gps_topic", config.gps_topic);
   return true;
 }
 
